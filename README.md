@@ -12,7 +12,7 @@ By parsing a directory of .tf files using `pyhcl`, each defined resource can be 
 
 ### Meant to be used with my fork of terrascan
 
-### Modules are resolved and variables are replaced**
+### Modules are resolved and variables are replaced
 
 * if variables are defined outside the scope of the Terraform files, like in AWS, they are not replaced
 * modules sourced outside the scope of the Terraform files, like in AWS or git, are not handled

@@ -8,7 +8,43 @@ A python package that allows users to define Policy as Code for Terraform config
 
 By parsing a directory of .tf files using `pyhcl`, each defined resource can be tested using this module. 
 
-## Example Usages
+## Updates in this fork
+
+### Meant to be used with my fork of terrascan
+
+### Modules are resolved and variables are replaced**
+
+* if variables are defined outside the scope of the Terraform files, like in AWS, they are not replaced
+* modules sourced outside the scope of the Terraform files, like in AWS or git, are not handled
+* terraform functions are not handled; i.e. split(",",local.s3_logging_arns)
+* equations are not handled; i.e. var.s3\_logging\_arns == "" ? "arn:aws:s3:::DISABLED/" : var.s3\_logging_arns
+* does not process anything inside any HEREDOCs.  However, this can be fixed by adding the following lines of code to lexer.py in the \_end_heredoc function which is part of the pyhcl open source project:
+
+```
+            # load value as json
+            try:
+                t.value = json.loads(t.value)
+            except:
+                pass
+```
+
+### Does not raise any exceptions
+
+* stores all failures and writes them out at the end
+* all failures include the problem module and file name
+
+### Various levels of logging allowed
+
+* The logging level can be changed by passing the -c or --config parameter with one of the logging levels listed below.  There are five logging options available.  All are written to the console only.
+  * none:  no logging
+  * error: only shows errors (default); i.e. couldn't find module or couldn't replace a variable when expected to be handled
+  * warning: also shows every module being loaded and every variable being replaced
+  * info: also shows intermediate variable replacement
+  * debug: also shows when a variable couldn't be replaced even if not expected to be handled and the files that were processed
+
+
+
+## Example Usage
 
 ### Check that all AWS EBS volumes are encrypted
 
@@ -16,64 +52,33 @@ By parsing a directory of .tf files using `pyhcl`, each defined resource can be 
 ```
 import terraform_validate
 
-class TestEncryptionAtRest(unittest.TestCase):
+jsonOutput = {
+        "failures": [],
+        "errors": []
+    }
+
+class Rules(unittest.TestCase):
 
     def setUp(self):
-        # Tell the module where to find your terraform configuration folder
-        self.path = os.path.join(os.path.dirname(os.path.realpath(__file__)),"../terraform")
-        self.v = terraform_validate.Validator(self.path)
-
-    def test_aws_ebs_volume(self):
-        # Assert that all resources of type 'aws_ebs_volume' are encrypted
+        self.v = terraform_validate.Validator()
+        self.v.preprocessor = self.preprocessor
+        
+    def test_aws_ebs_volume_encryption(self):
+        # verify that all resources of type 'aws_ebs_volume' are encrypted
         self.v.error_if_property_missing() # Fail any tests if the property does not exist on a resource
-        self.v.resources('aws_ebs_volume').property('encrypted').should_equal(True)
+        # run rule on all terraform files individually
+        validator_generator = self.v.get_terraform_files()
+        for validator in validator_generator:        
+            # to change severity, override it here (default is high)
+            validator.severity = "high"        
+            validator.resources('aws_ebs_volume').property('encrypted').should_equal(True)
 
-    def test_instance_ebs_block_device(self):
-        # Assert that all resources of type 'ebs_block_device' that are inside a 'aws_instance' are encrypted
-        self.v.error_if_property_missing()
-        self.v.resources('aws_instance').property('ebs_block_device').property('encrypted').should_equal(True)
 
-if __name__ == '__main__':
-    suite = unittest.TestLoader().loadTestsFromTestCase(TestEncryptionAtRest)
-    unittest.TextTestRunner(verbosity=0).run(suite)
 
-```
-
-```
-resource "aws_instance" "foo" {
-  # This would fail the test
-  ebs_block_device{
-    encrypted = false
-  }
-}
-
-resource "aws_ebs_volume" "bar" {
+resource "aws_ebs_volume" "foo" {
   # This would fail the test
   encrypted = false
 }
-```
-
-### Check that AWS resources are tagged correctly
-
-```
-import terraform_validate
-
-class TestEncryptionAtRest(unittest.TestCase):
-
-    def setUp(self):
-        # Tell the module where to find your terraform configuration folder
-        self.path = os.path.join(os.path.dirname(os.path.realpath(__file__)),"../terraform")
-        self.v = terraform_validate.Validator(self.path)
-
-    def test_aws_ebs_volume(self):
-        # Assert that all resources of type 'aws_instance' and 'aws_ebs_volume' have the correct tags
-        tagged_resources = ["aws_instance","aws_ebs_volume"]
-        required_tags = ["name","version","owner"]
-        self.v.resources(tagged_resources).property('tags').should_have_properties(required_tags)
-
-if __name__ == '__main__':
-    suite = unittest.TestLoader().loadTestsFromTestCase(TestEncryptionAtRest)
-    unittest.TextTestRunner(verbosity=0).run(suite)
 ```
 
 ## Behaviour functions
@@ -84,11 +89,9 @@ These affect the results of the Validation functions in a way that may be requir
 
 By default, no errors will be raised if a property value is missing on a resource. This changes the behavior of .property() calls to raise an error if a property is not found on a resource.
 
-### Validator.enable_variable_expansion()
+### Validator.severity
 
-By default, variables in property values will not be calculated against their default values. This changes the behaviour of all Validation functions, to work out the value of a string when the variables have default values.
-
-eg. `string = "${var.foo}"` will be read as `string = "1"` by the validator if the default value of `foo` is 1.
+The severity is only displayed in the failure message.  By default, the severity is set to "high".  To change the severity for a rule to medium, set Validator.severity = "medium".
 
 ## Search functions
 
@@ -134,71 +137,57 @@ eg. ``.resource('aws_instance').find_property('tag[a-z]')``
 
 ## Validation functions
 
-If there are any errors, these functions will print the error and raise an AssertionError. The purpose of these functions is to validate the property values of different resources.
+If there are any failures/errors, these functions will store the failures/errors. The purpose of these functions is to validate the property values of different resources.
 
 ### TerraformResourceList.should_have_properties([required_properties])
 
-Will raise an AssertionError if any of the properties in `required_properties` are missing from a `TerraformResourceList`.
-
-### TerraformPropertyList.should_have_properties([required_properties])
-
-Will raise an AssertionError if any of the properties in `required_properties` are missing from a `TerraformPropertyList`.
+Will verify that all of the properties in `required_properties` are in a `TerraformResourceList`.
 
 ### TerraformResourceList.should_not_have_properties([excluded_properties])
 
-Will raise an AssertionError if any of the properties in `required_properties` are missing from a `TerraformResourceList`.
-
-### TerraformPropertyList.should_not_have_properties([excluded_properties])
-
-Will raise an AssertionError if any of the properties in `required_properties` are missing from a `TerraformPropertyList`.
+Will verify that none of the properties in `excluded_properties` are in a `TerraformResourceList`.
 
 ### TerraformResourceList.name_should_match_regex(regex)
 
-Will raise an AssertionError if the Terraform resource name does not match the value of `regex`
+Will verify that the Terraform resource name matches the value of `regex`
+
+### TerraformResourceList.should_not_exist()
+
+Will verify that the resources in `TerraformResourceList` do not exist
+
+### TerraformPropertyList.should_have_properties([required_properties])
+
+Will verify that all of the properties in `required_properties` are in a `TerraformPropertyList`.
+
+### TerraformPropertyList.should_not_have_properties([excluded_properties])
+
+Will verify that none of the properties in `excluded_properties` are in a `TerraformPropertyList`.
 
 ### TerraformPropertyList.should_equal(expected_value)
 
-Will raise an AssertionError if the value of the property does not equal `expected_value`
+Will verify that the value of the property is equal to `expected_value`
+
+### TerraformPropertyList.should_equal_case_insensitive(expected_value)
+
+Will verify that the value of the property is equal to `expected_value` case insensitive
 
 ### TerraformPropertyList.should_not_equal(unexpected_value)
 
-Will raise an AssertionError if the value of the property equals `unexpected_value`
+Will verify that the value of the property does not equal `unexpected_value`
+
+### TerraformPropertyList.should_not_equal_case_insensitive(unexpected_value)
+
+Will verify that the value of the property does not equal `unexpected_value` case insensitive
 
 ### TerraformPropertyList.should_match_regex(regex)
 
-Will raise an AssertionError if the value of the property does not match the value of `regex`
+Will verify that the value of the property matches the value of `regex`
 
 ### TerraformPropertyList.list_should_contain([value])
 
-Will raise an AssertionError if the list value does not contain any of the `[value]`
+Will verify that the list value contains all of the `[value]`
 
 ### TerraformPropertyList.list_should_not_contain([value])
 
-Will raise an AssertionError if the list value does contain any of the `[value]`
+Will verify that the list value does not contain any of the `[value]`
 
-
-
-## Run with Docker
-
-Build the terraform_validate daemon using:
-
-```
-docker build -t terraform_validate .
-```
-
-Then, on a different location, place your tests on your tests.py.
-
-To run:
-```
-docker run -v `pwd`:/terraform_validate terraform_validate
-```
-
-Example output (All tests passing):
-
-```
-$ docker run -v `pwd`:/terraform_validate terraform_validate
-----------------------------------------------------------------------
-Ran 3 tests in 1.607s
-
-OK
-```

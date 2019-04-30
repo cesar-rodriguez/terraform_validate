@@ -4,13 +4,13 @@ Linux: [![Linux Build Status](https://travis-ci.org/elmundio87/terraform_validat
 
 Windows: [![Windows Build status](https://ci.appveyor.com/api/projects/status/36dwtekc8tvrny24/branch/master?svg=true)](https://ci.appveyor.com/project/elmundio87/terraform-validate/branch/master)
 
-A python package that allows users to define Policy as Code for Terraform configurations. 
+A python package that allows users to define Policy as Code for Terraform configurations.
 
-By parsing a directory of .tf files using `pyhcl`, each defined resource can be tested using this module. 
+By parsing a directory of .tf files using `pyhcl`, each defined resource can be tested using this module.
 
 ## Updates in this fork
 
-### Meant to be used with my fork of terrascan
+### Meant to be used with my fork of terrascan (terrascan-sf until pull request accepted)
 
 ### Modules are resolved and variables are replaced
 
@@ -62,7 +62,7 @@ class Rules(unittest.TestCase):
     def setUp(self):
         self.v = terraform_validate.Validator()
         self.v.preprocessor = self.preprocessor
-        
+
     def test_aws_ebs_volume_encryption(self):
         # verify that all resources of type 'aws_ebs_volume' are encrypted
         self.v.error_if_property_missing() # Fail any tests if the property does not exist on a resource
@@ -190,4 +190,3 @@ Will verify that the list value contains all of the `[value]`
 ### TerraformPropertyList.list_should_not_contain([value])
 
 Will verify that the list value does not contain any of the `[value]`
-

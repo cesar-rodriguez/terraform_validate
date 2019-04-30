@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="terraform_validate-sf",
+    name="terraform_validate",
     version="3.0.0",
     author="Edmund Dipple",
     author_email="elmundio1987@gmail.com",

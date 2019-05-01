@@ -44,8 +44,12 @@ class TestValidatorFunctional(unittest.TestCase):
         for validator in self.getValidatorGenerator("fixtures/resource"):
             validator.resources('aws_instance').property('value').should_equal(1)
             validator.resources('aws_instance').property('value').should_equal(2)
-        self.assertEqual("[aws_instance.foo.value] should be '2'. Is: '1'", self.jsonOutput["failures"][0]["message"], "resource test failed")
-        self.assertEqual("[aws_instance.bar.value] should be '2'. Is: '1'", self.jsonOutput["failures"][1]["message"], "resource test failed")
+        if self.jsonOutput["failures"][0]["message"].startswith("[aws_instance.foo.value]"):
+            self.assertEqual("[aws_instance.foo.value] should be '2'. Is: '1'", self.jsonOutput["failures"][0]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.bar.value] should be '2'. Is: '1'", self.jsonOutput["failures"][1]["message"], "resource test failed")
+        else:
+            self.assertEqual("[aws_instance.bar.value] should be '2'. Is: '1'", self.jsonOutput["failures"][0]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.foo.value] should be '2'. Is: '1'", self.jsonOutput["failures"][1]["message"], "resource test failed")
         self.assertEqual(0, len(self.jsonOutput["errors"]), "resource test failed")
 
     def test_resource_should_equal_case_insensitive(self):
@@ -66,8 +70,12 @@ class TestValidatorFunctional(unittest.TestCase):
         for validator in self.getValidatorGenerator("fixtures/resource"):
             validator.resources('aws_instance').property('value').should_not_equal(0)
             validator.resources('aws_instance').property('value').should_not_equal(1)
-        self.assertEqual("[aws_instance.foo.value] should not be '1'. Is: '1'", self.jsonOutput["failures"][0]["message"], "resource test failed")
-        self.assertEqual("[aws_instance.bar.value] should not be '1'. Is: '1'", self.jsonOutput["failures"][1]["message"], "resource test failed")
+        if self.jsonOutput["failures"][0]["message"].startswith("[aws_instance.foo.value]"):            
+            self.assertEqual("[aws_instance.foo.value] should not be '1'. Is: '1'", self.jsonOutput["failures"][0]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.bar.value] should not be '1'. Is: '1'", self.jsonOutput["failures"][1]["message"], "resource test failed")
+        else:
+            self.assertEqual("[aws_instance.bar.value] should not be '1'. Is: '1'", self.jsonOutput["failures"][0]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.foo.value] should not be '1'. Is: '1'", self.jsonOutput["failures"][1]["message"], "resource test failed")
         self.assertEqual(0, len(self.jsonOutput["errors"]), "resource test failed")
 
     def test_resource_not_equals_case_insensitive(self):
@@ -90,10 +98,16 @@ class TestValidatorFunctional(unittest.TestCase):
         for validator in self.getValidatorGenerator("fixtures/resource"):
             validator.resources('aws_instance').should_have_properties(required_properties_ok)
             validator.resources('aws_instance').should_have_properties(required_properties)
-        self.assertEqual("[aws_instance.foo] should have property: 'abc123'", self.jsonOutput["failures"][0]["message"], "resource test failed")
-        self.assertEqual("[aws_instance.foo] should have property: 'def456'", self.jsonOutput["failures"][1]["message"], "resource test failed")
-        self.assertEqual("[aws_instance.bar] should have property: 'abc123'", self.jsonOutput["failures"][2]["message"], "resource test failed")
-        self.assertEqual("[aws_instance.bar] should have property: 'def456'", self.jsonOutput["failures"][3]["message"], "resource test failed")
+        if self.jsonOutput["failures"][0]["message"].startswith("[aws_instance.foo]"):
+            self.assertEqual("[aws_instance.foo] should have property: 'abc123'", self.jsonOutput["failures"][0]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.foo] should have property: 'def456'", self.jsonOutput["failures"][1]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.bar] should have property: 'abc123'", self.jsonOutput["failures"][2]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.bar] should have property: 'def456'", self.jsonOutput["failures"][3]["message"], "resource test failed")
+        else:
+            self.assertEqual("[aws_instance.bar] should have property: 'abc123'", self.jsonOutput["failures"][0]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.bar] should have property: 'def456'", self.jsonOutput["failures"][1]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.foo] should have property: 'abc123'", self.jsonOutput["failures"][2]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.foo] should have property: 'def456'", self.jsonOutput["failures"][3]["message"], "resource test failed")
         self.assertEqual(0, len(self.jsonOutput["errors"]), "resource test failed")
 
     def test_resource_excluded_properties_with_list_input(self):
@@ -102,10 +116,16 @@ class TestValidatorFunctional(unittest.TestCase):
         for validator in self.getValidatorGenerator("fixtures/resource"):
             validator.resources('aws_instance').should_not_have_properties(non_excluded_properties)
             validator.resources('aws_instance').should_not_have_properties(excluded_properties)
-        self.assertEqual("[aws_instance.foo] should not have property: 'value'", self.jsonOutput["failures"][0]["message"], "resource test failed")
-        self.assertEqual("[aws_instance.foo] should not have property: 'value2'", self.jsonOutput["failures"][1]["message"], "resource test failed")
-        self.assertEqual("[aws_instance.bar] should not have property: 'value'", self.jsonOutput["failures"][2]["message"], "resource test failed")
-        self.assertEqual("[aws_instance.bar] should not have property: 'value2'", self.jsonOutput["failures"][3]["message"], "resource test failed")
+        if self.jsonOutput["failures"][0]["message"].startswith("[aws_instance.foo]"):            
+            self.assertEqual("[aws_instance.foo] should not have property: 'value'", self.jsonOutput["failures"][0]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.foo] should not have property: 'value2'", self.jsonOutput["failures"][1]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.bar] should not have property: 'value'", self.jsonOutput["failures"][2]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.bar] should not have property: 'value2'", self.jsonOutput["failures"][3]["message"], "resource test failed")
+        else:
+            self.assertEqual("[aws_instance.bar] should not have property: 'value'", self.jsonOutput["failures"][0]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.bar] should not have property: 'value2'", self.jsonOutput["failures"][1]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.foo] should not have property: 'value'", self.jsonOutput["failures"][2]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.foo] should not have property: 'value2'", self.jsonOutput["failures"][3]["message"], "resource test failed")
         self.assertEqual(0, len(self.jsonOutput["errors"]), "resource test failed")
 
     def test_resource_excluded_properties_with_string_input(self):
@@ -114,8 +134,12 @@ class TestValidatorFunctional(unittest.TestCase):
         for validator in self.getValidatorGenerator("fixtures/resource"):
             validator.resources('aws_instance').should_not_have_properties(non_excluded_property)
             validator.resources('aws_instance').should_not_have_properties(excluded_property)
-        self.assertEqual("[aws_instance.foo] should not have property: 'value'", self.jsonOutput["failures"][0]["message"], "resource test failed")
-        self.assertEqual("[aws_instance.bar] should not have property: 'value'", self.jsonOutput["failures"][1]["message"], "resource test failed")
+        if self.jsonOutput["failures"][0]["message"].startswith("[aws_instance.foo]"):            
+            self.assertEqual("[aws_instance.foo] should not have property: 'value'", self.jsonOutput["failures"][0]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.bar] should not have property: 'value'", self.jsonOutput["failures"][1]["message"], "resource test failed")
+        else:
+            self.assertEqual("[aws_instance.bar] should not have property: 'value'", self.jsonOutput["failures"][0]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.foo] should not have property: 'value'", self.jsonOutput["failures"][1]["message"], "resource test failed")
         self.assertEqual(0, len(self.jsonOutput["errors"]), "resource test failed")
 
     def test_nested_resource_required_properties_with_list_input(self):
@@ -160,8 +184,12 @@ class TestValidatorFunctional(unittest.TestCase):
         for validator in self.getValidatorGenerator("fixtures/resource"):
             validator.resources('aws_instance').property('value').should_match_regex('[0-9]')
             validator.resources('aws_instance').property('value').should_match_regex('[a-z]')
-        self.assertEqual("[aws_instance.foo.value] should match regex '[a-z]'", self.jsonOutput["failures"][0]["message"], "resource test failed")
-        self.assertEqual("[aws_instance.bar.value] should match regex '[a-z]'", self.jsonOutput["failures"][1]["message"], "resource test failed")
+        if self.jsonOutput["failures"][0]["message"].startswith("[aws_instance.foo.value]"):
+            self.assertEqual("[aws_instance.foo.value] should match regex '[a-z]'", self.jsonOutput["failures"][0]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.bar.value] should match regex '[a-z]'", self.jsonOutput["failures"][1]["message"], "resource test failed")
+        else:
+            self.assertEqual("[aws_instance.bar.value] should match regex '[a-z]'", self.jsonOutput["failures"][0]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.foo.value] should match regex '[a-z]'", self.jsonOutput["failures"][1]["message"], "resource test failed")
         self.assertEqual(0, len(self.jsonOutput["errors"]), "resource test failed")
 
     def test_nested_resource_property_value_matches_regex(self):
@@ -200,8 +228,12 @@ class TestValidatorFunctional(unittest.TestCase):
     def test_searching_for_property_on_nonexistant_nested_resource(self):
         for validator in self.getValidatorGenerator("fixtures/resource", True):
             validator.resources('aws_instance').property('tags').property('tagname').should_equal(1)
-        self.assertEqual("[aws_instance.foo] should have property: 'tags'", self.jsonOutput["failures"][0]["message"], "resource test failed")
-        self.assertEqual("[aws_instance.bar] should have property: 'tags'", self.jsonOutput["failures"][1]["message"], "resource test failed")
+        if self.jsonOutput["failures"][0]["message"].startswith("[aws_instance.foo]"):
+            self.assertEqual("[aws_instance.foo] should have property: 'tags'", self.jsonOutput["failures"][0]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.bar] should have property: 'tags'", self.jsonOutput["failures"][1]["message"], "resource test failed")
+        else:
+            self.assertEqual("[aws_instance.bar] should have property: 'tags'", self.jsonOutput["failures"][0]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.foo] should have property: 'tags'", self.jsonOutput["failures"][1]["message"], "resource test failed")
         self.assertEqual(0, len(self.jsonOutput["errors"]), "resource test failed")
 
     def test_searching_for_property_value_using_regex(self):
@@ -222,8 +254,12 @@ class TestValidatorFunctional(unittest.TestCase):
         for validator in self.getValidatorGenerator("fixtures/resource"):
             validator.resources(['aws_instance', 'aws_elb']).property('value').should_equal(1)
             validator.resources(['aws_instance', 'aws_elb']).property('value').should_equal(2)
-        self.assertEqual("[aws_instance.foo.value] should be '2'. Is: '1'", self.jsonOutput["failures"][0]["message"], "resource test failed")
-        self.assertEqual("[aws_instance.bar.value] should be '2'. Is: '1'", self.jsonOutput["failures"][1]["message"], "resource test failed")
+        if self.jsonOutput["failures"][0]["message"].startswith("[aws_instance.foo.value]"):
+            self.assertEqual("[aws_instance.foo.value] should be '2'. Is: '1'", self.jsonOutput["failures"][0]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.bar.value] should be '2'. Is: '1'", self.jsonOutput["failures"][1]["message"], "resource test failed")
+        else:
+            self.assertEqual("[aws_instance.bar.value] should be '2'. Is: '1'", self.jsonOutput["failures"][0]["message"], "resource test failed")
+            self.assertEqual("[aws_instance.foo.value] should be '2'. Is: '1'", self.jsonOutput["failures"][1]["message"], "resource test failed")
         self.assertEqual("[aws_elb.buzz.value] should be '2'. Is: '1'", self.jsonOutput["failures"][2]["message"], "resource test failed")
         self.assertEqual(0, len(self.jsonOutput["errors"]), "resource test failed")
 
@@ -306,8 +342,12 @@ class TestValidatorFunctional(unittest.TestCase):
         for validator in self.getValidatorGenerator("fixtures/list_variable"):
             validator.resources("datadog_monitor").property("tags").list_should_contain(['baz:biz'])
             validator.resources("datadog_monitor").property("tags").list_should_contain('too:biz')
-        self.assertEqual("[datadog_monitor.foo.tags] '['baz:biz']' should contain '['too:biz']'.", self.jsonOutput["failures"][0]["message"], "resource test failed")
-        self.assertEqual("[datadog_monitor.bar.tags] '['baz:biz', 'foo:bar']' should contain '['too:biz']'.", self.jsonOutput["failures"][1]["message"], "resource test failed")
+        if self.jsonOutput["failures"][0]["message"].startswith("[datadog_monitor.foo.tags]"):
+            self.assertEqual("[datadog_monitor.foo.tags] '['baz:biz']' should contain '['too:biz']'.", self.jsonOutput["failures"][0]["message"], "resource test failed")
+            self.assertEqual("[datadog_monitor.bar.tags] '['baz:biz', 'foo:bar']' should contain '['too:biz']'.", self.jsonOutput["failures"][1]["message"], "resource test failed")
+        else:
+            self.assertEqual("[datadog_monitor.bar.tags] '['baz:biz', 'foo:bar']' should contain '['too:biz']'.", self.jsonOutput["failures"][0]["message"], "resource test failed")
+            self.assertEqual("[datadog_monitor.foo.tags] '['baz:biz']' should contain '['too:biz']'.", self.jsonOutput["failures"][1]["message"], "resource test failed")
         self.assertEqual(0, len(self.jsonOutput["errors"]), "resource test failed")
 
     def test_list_should_not_contain(self):

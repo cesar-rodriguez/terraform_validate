@@ -1,5 +1,6 @@
 import hcl
 import os
+import codecs
 import re
 import traceback
 import json
@@ -461,7 +462,7 @@ class PreProcessor:
                     fileName = os.path.join(directory, file)
                     relativeFileName = fileName[len(path):]
                     if os.path.getsize(fileName) != 0:
-                        with open(fileName, encoding=self.UTF8) as fp:
+                        with codecs.open(fileName, 'r', encoding='utf8') as f:
                             try:
                                 terraform_string = fp.read()
                                 self.loadFileByDir(fileName, relativeFileName, d, d, terraform_string)

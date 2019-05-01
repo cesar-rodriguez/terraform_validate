@@ -462,7 +462,7 @@ class PreProcessor:
                     fileName = os.path.join(directory, file)
                     relativeFileName = fileName[len(path):]
                     if os.path.getsize(fileName) != 0:
-                        with codecs.open(fileName, 'r', encoding='utf8') as f:
+                        with codecs.open(fileName, 'r', encoding='utf8') as fp:
                             try:
                                 terraform_string = fp.read()
                                 self.loadFileByDir(fileName, relativeFileName, d, d, terraform_string)

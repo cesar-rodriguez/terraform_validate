@@ -21,3 +21,8 @@ resource "aws_elb" "buzz" {
     value = 1
 
 }
+resource "aws_s3_bucket" "zzz" {
+
+    value = "abc"
+
+}

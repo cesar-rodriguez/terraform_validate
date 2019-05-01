@@ -11,7 +11,7 @@ resource "aws_instance" "foo" {
 
 }
 
-resource "aws_elb" "foo" {
+resource "aws_elb" "bar" {
 
     tags {
         value = 1

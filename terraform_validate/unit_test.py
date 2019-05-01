@@ -809,7 +809,6 @@ class TestValidator(unittest.TestCase):
         self.assertEqual(0, len(module[p.RESOURCE]))
 
         module = p.modulesDict["config"]
-        print("test_getAllModules - module: " + str(module[p.VARIABLE].keys()))
         self.assertEqual(1, len(module[p.VARIABLE]))
         self.assertEqual(configVar1Value, module[p.VARIABLE][configVar1])
         self.assertEqual(2, len(module[p.LOCALS]))
@@ -890,7 +889,6 @@ class TestValidator(unittest.TestCase):
 
         self.assertEqual(1, len(actualModuleDict[p.RESOURCE]))
         actualResource = actualModuleDict[p.RESOURCE][resourceMyRoute]
-        print("test_getModule - resourceMyRouteValue:" + str(resourceMyRouteValue))
         self.assertEqual(str(resourceMyRouteValue).replace('$', '@'), str(actualResource.config))
         self.assertEqual(mainFileName, actualResource.fileName)
         self.assertEqual(moduleName, actualResource.moduleName)
@@ -955,7 +953,6 @@ class TestValidator(unittest.TestCase):
 
         self.assertEqual(1, len(actualModuleDict[p.RESOURCE]))
         actualResource = actualModuleDict[p.RESOURCE][resourceMyRoute]
-        print("test_findModule - resourceMyRouteValue:" + str(resourceMyRouteValue))
         self.assertEqual(str(resourceMyRouteValue).replace('$', '@'), str(actualResource.config))
         self.assertEqual(mainFileName, actualResource.fileName)
         self.assertEqual(moduleName, actualResource.moduleName)
@@ -1022,7 +1019,6 @@ class TestValidator(unittest.TestCase):
 
         self.assertEqual(1, len(actualModuleDict[p.RESOURCE]))
         actualResource = actualModuleDict[p.RESOURCE][resourceMyRoute]
-        print("test_loadModule - resourceMyRouteValue:" + str(resourceMyRouteValue))
         self.assertEqual(str(resourceMyRouteValue).replace('$', '@'), str(actualResource.config))
         self.assertEqual(mainFileName, actualResource.fileName)
         self.assertEqual(moduleName, actualResource.moduleName)
@@ -1109,7 +1105,7 @@ class TestValidator(unittest.TestCase):
         # run test
         actual = p.getSourcePath(parameterDict)
         # asserts
-        self.assertIsNone(actual)
+        self.assertEqual(None, actual)
 
     def test_getModuleDictFromSourcePath_Found(self):
         # initialize

@@ -125,6 +125,7 @@ varEnvironmentValue = "test"
 
 
 def createHCL(p):
+    resourceMyRouteValue = {'route_table_id': '${var.route_table_id}', 'destination_cidr_block': '${var.destination_cidr}', 'gateway_id': '${var.vgw_id}'}
     root = createHCLentry(p, None, "root")
     modules = createHCLentry(p, root, "modules")
     common = createHCLentry(p, modules, "common")
@@ -808,6 +809,7 @@ class TestValidator(unittest.TestCase):
         self.assertEqual(0, len(module[p.RESOURCE]))
 
         module = p.modulesDict["config"]
+        print("test_getAllModules - module: " + str(module[p.VARIABLE].keys()))
         self.assertEqual(1, len(module[p.VARIABLE]))
         self.assertEqual(configVar1Value, module[p.VARIABLE][configVar1])
         self.assertEqual(2, len(module[p.LOCALS]))
@@ -888,6 +890,7 @@ class TestValidator(unittest.TestCase):
 
         self.assertEqual(1, len(actualModuleDict[p.RESOURCE]))
         actualResource = actualModuleDict[p.RESOURCE][resourceMyRoute]
+        print("test_getModule - resourceMyRouteValue:" + str(resourceMyRouteValue))
         self.assertEqual(str(resourceMyRouteValue).replace('$', '@'), str(actualResource.config))
         self.assertEqual(mainFileName, actualResource.fileName)
         self.assertEqual(moduleName, actualResource.moduleName)
@@ -952,6 +955,7 @@ class TestValidator(unittest.TestCase):
 
         self.assertEqual(1, len(actualModuleDict[p.RESOURCE]))
         actualResource = actualModuleDict[p.RESOURCE][resourceMyRoute]
+        print("test_findModule - resourceMyRouteValue:" + str(resourceMyRouteValue))
         self.assertEqual(str(resourceMyRouteValue).replace('$', '@'), str(actualResource.config))
         self.assertEqual(mainFileName, actualResource.fileName)
         self.assertEqual(moduleName, actualResource.moduleName)
@@ -1018,6 +1022,7 @@ class TestValidator(unittest.TestCase):
 
         self.assertEqual(1, len(actualModuleDict[p.RESOURCE]))
         actualResource = actualModuleDict[p.RESOURCE][resourceMyRoute]
+        print("test_loadModule - resourceMyRouteValue:" + str(resourceMyRouteValue))
         self.assertEqual(str(resourceMyRouteValue).replace('$', '@'), str(actualResource.config))
         self.assertEqual(mainFileName, actualResource.fileName)
         self.assertEqual(moduleName, actualResource.moduleName)

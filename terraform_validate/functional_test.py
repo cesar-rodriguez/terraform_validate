@@ -280,7 +280,6 @@ class TestValidatorFunctional(unittest.TestCase):
 
     def test_variable_default_value_equals(self):
         for validator in self.getValidatorGenerator("fixtures/default_variable"):
-            print("modulesDict: " + str(validator.preprocessor.modulesDict.keys()))
             fooValue = validator.preprocessor.modulesDict["default_variable"]["variable"].get("foo")
             barValue = validator.preprocessor.modulesDict["default_variable"]["variable"].get("bar")
         self.assertEqual("1", fooValue, "resource test failed")

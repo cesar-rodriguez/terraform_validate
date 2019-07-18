@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="terraform_validate",
-    version="3.0.1",
+    version="3.1.6",
     author="Edmund Dipple",
     author_email="elmundio1987@gmail.com",
     description="A library that provides asserts for testing Terraform configuration",

@@ -89,18 +89,27 @@ def createHCLentry(p, parent, moduleName, isModule=True, fileName=None):
 moduleName = "10-root"
 mainFileName = "C:\\DEV\\terraforms\\backends\\10-root\\main.tf"
 resourceMyRoute = "myRoute"
-resourceMyRouteValue = {'route_table_id': '${var.route_table_id}', 'destination_cidr_block': '${var.destination_cidr}', 'gateway_id': '${var.vgw_id}'}
+resourceMyRoute2 = "myRoute2"
 localsEnv = "env"
+localsEnv2 = "env2"
 localsEnvValue = "${var.environment}"
+localsEnvValue2 = "var.environment"
 localsVpcType = "vpc_type"
 localsVpcTypeValue = "analytics"
 testVpcId = 'vpc-2'
 localsEnvVpcId = "env_vpc_id"
+localsEnvVpcId2 = "env_vpc_id2"
 localsEnvVpcIdValue = {'isbx': 'vpc-1', 'test': testVpcId, 'prod': 'vpc-3'}
+localsEnvVpcIdValue2 = {'isbx': 'vpc-1x', 'test': testVpcId, 'prod': 'vpc-3x'}
 localsVpcId = "vpc_id"
-localsVpcIdValue = "${local.env_vpc_id[local.env]}"
+localsVpcId2 = "vpc_id2"
+localsVpcIdValue = "${local." + localsEnvVpcId + "[local.env]}"
+localsVpcIdValue2 = "local." + localsEnvVpcId2 + "[local.env2]"
 localsSubmetNamePrefix = "subnet-name-prefix"
 localsSubmetNamePrefixValue = "sf-${module.common.account_name}-${local.vpc_type}-${local.env}"
+
+resourceMyRouteValue = {'route_table_id': '${var.route_table_id}', 'destination_cidr_block': '${var.destination_cidr}', 'gateway_id': '${var.vgw_id}'}
+resourceMyRouteValue2 = {'route_table_id': 'var.route_table_id', 'destination_cidr_block': 'var.destination_cidr', 'gateway_id': 'var.vgw_id'}
 
 commonOutputAccountName = "account_name"
 commonOutputAccountNameValue = "pcas"
@@ -115,17 +124,20 @@ configVar1Value = {'dev': '123.456', 'test': testIP, 'prod': '345.678'}
 configLocal1 = "configLocal1"
 configLocal1Value = "thisIsALocalValue"
 configLocal2 = "configLocal2"
+configLocal22 = "configLocal22"
 configLocal2Value = "${var." + configVar1 + "[var.environment]}"
+configLocal2Value2 = "var." + configVar1 + "[var.environment]"
 output1 = "output1"
 output1Value = "${module.config.yada[var.environment]}"
 output2 = "output2"
-output2Value = "output2Value"
+output2Value = "module.config.yada[var.environment]"
+output3 = "output3"
+output3Value = "output3Value"
 
 varEnvironmentValue = "test"
 
 
 def createHCL(p):
-    resourceMyRouteValue = {'route_table_id': '${var.route_table_id}', 'destination_cidr_block': '${var.destination_cidr}', 'gateway_id': '${var.vgw_id}'}
     root = createHCLentry(p, None, "root")
     modules = createHCLentry(p, root, "modules")
     common = createHCLentry(p, modules, "common")
@@ -142,6 +154,7 @@ def createHCL(p):
     outputConfig[p.OUTPUT][configOutput3][p.VALUE] = configOutput3Value
     outputConfig[p.LOCALS][configLocal1] = configLocal1Value
     outputConfig[p.LOCALS][configLocal2] = configLocal2Value
+    outputConfig[p.LOCALS][configLocal22] = configLocal2Value2
     varConfig = createHCLentry(p, config, "vars.tf", False, "C:\\DEV\\terraforms\\modules\\config\\vars.tf")
     varConfig[p.VARIABLE][configVar1] = {"default": configVar1Value}
     private_gw = createHCLentry(p, modules, "private-gw")
@@ -157,10 +170,13 @@ def createHCL(p):
     backend[p.MODULE]["config"][p.SOURCE] = "../../modules/config"
     backend[p.MODULE]["config"]["env"] = "${var.environment}"
     backend[p.LOCALS][localsEnv] = localsEnvValue
+    backend[p.LOCALS][localsEnv2] = localsEnvValue2
     env = createHCLentry(p, d, "env.tf", False, "C:\\DEV\\terraforms\\backends\\10-root\\env.tf")
     env[p.LOCALS][localsVpcType] = localsVpcTypeValue
     env[p.LOCALS][localsEnvVpcId] = localsEnvVpcIdValue
+    env[p.LOCALS][localsEnvVpcId2] = localsEnvVpcIdValue2
     env[p.LOCALS][localsVpcId] = localsVpcIdValue
+    env[p.LOCALS][localsVpcId2] = localsVpcIdValue2
     env[p.LOCALS][localsSubmetNamePrefix] = localsSubmetNamePrefixValue
     main = createHCLentry(p, d, "main.tf", False, mainFileName)
     main[p.MODULE]["private-gw"] = {}
@@ -169,11 +185,14 @@ def createHCL(p):
     main[p.MODULE]["private-gw"]["aws_region"] = "${module.common.region}"
     main[p.RESOURCE]["aws_route"] = {}
     main[p.RESOURCE]["aws_route"][resourceMyRoute] = resourceMyRouteValue
+    main[p.RESOURCE]["aws_route"][resourceMyRoute2] = resourceMyRouteValue2
     output = createHCLentry(p, d, "output.tf", False, "C:\\DEV\\terraforms\\backends\\10-root\\output.tf")
     output[p.OUTPUT][output1] = {}
     output[p.OUTPUT][output1][p.VALUE] = output1Value
     output[p.OUTPUT][output2] = {}
     output[p.OUTPUT][output2][p.VALUE] = output2Value
+    output[p.OUTPUT][output3] = {}
+    output[p.OUTPUT][output3][p.VALUE] = output3Value
     p.hclDict = root
     p.variablesFromCommandLine = {}
     p.variablesFromCommandLine["var.environment"] = varEnvironmentValue
@@ -811,9 +830,10 @@ class TestValidator(unittest.TestCase):
         module = p.modulesDict["config"]
         self.assertEqual(1, len(module[p.VARIABLE]))
         self.assertEqual(configVar1Value, module[p.VARIABLE][configVar1])
-        self.assertEqual(2, len(module[p.LOCALS]))
+        self.assertEqual(3, len(module[p.LOCALS]))
         self.assertEqual(configLocal1Value, module[p.LOCALS][configLocal1])
         self.assertEqual(testIP, module[p.LOCALS][configLocal2])
+        self.assertEqual(testIP, module[p.LOCALS][configLocal22])
         self.assertEqual(3, len(module[p.OUTPUT]))
         self.assertEqual(configOutput1, module[p.OUTPUT][configOutput1])
         self.assertEqual(configOutput2, module[p.OUTPUT][configOutput2])
@@ -840,23 +860,33 @@ class TestValidator(unittest.TestCase):
         self.assertEqual(configOutput2, module[p.VARIABLE][configOutput2])
         self.assertEqual(configOutput3Value, module[p.VARIABLE][configOutput3])
 
-        self.assertEqual(5, len(module[p.LOCALS]))
+        self.assertEqual(8, len(module[p.LOCALS]))
         self.assertEqual(varEnvironmentValue, module[p.LOCALS][localsEnv])
+        self.assertEqual(varEnvironmentValue, module[p.LOCALS][localsEnv2])
         self.assertEqual(localsVpcTypeValue, module[p.LOCALS][localsVpcType])
         self.assertEqual(localsEnvVpcIdValue, module[p.LOCALS][localsEnvVpcId])
+        self.assertEqual(localsEnvVpcIdValue2, module[p.LOCALS][localsEnvVpcId2])
         self.assertEqual(testVpcId, module[p.LOCALS][localsVpcId])
+        self.assertEqual(testVpcId, module[p.LOCALS][localsVpcId2])
         self.assertEqual("sf-pcas-analytics-test", module[p.LOCALS][localsSubmetNamePrefix])
 
-        self.assertEqual(2, len(module[p.OUTPUT]))
+        self.assertEqual(3, len(module[p.OUTPUT]))
         self.assertEqual("@{module.config.yada[test]}", module[p.OUTPUT][output1])
-        self.assertEqual(output2Value, module[p.OUTPUT][output2])
+        self.assertEqual("module@.config.yada[test]", module[p.OUTPUT][output2])
+        self.assertEqual(output3Value, module[p.OUTPUT][output3])
 
-        self.assertEqual(1, len(module[p.RESOURCE]))
+        self.assertEqual(2, len(module[p.RESOURCE]))
         actualResource = module[p.RESOURCE][resourceMyRoute]
         self.assertEqual(str(resourceMyRouteValue).replace('$', '@'), str(actualResource.config))
         self.assertEqual(mainFileName, actualResource.fileName)
         self.assertEqual(moduleName, actualResource.moduleName)
         self.assertEqual(resourceMyRoute, actualResource.name)
+
+        actualResource = module[p.RESOURCE][resourceMyRoute2]
+        self.assertEqual(str(resourceMyRouteValue2).replace('var.', 'var@.'), str(actualResource.config))
+        self.assertEqual(mainFileName, actualResource.fileName)
+        self.assertEqual(moduleName, actualResource.moduleName)
+        self.assertEqual(resourceMyRoute2, actualResource.name)
 
     def test_getModule(self):
         # initialize
@@ -867,7 +897,7 @@ class TestValidator(unittest.TestCase):
         }
         p = terraform_validate.PreProcessor(jsonOutput)
         d, moduleName = createHCL(p)
-        # run test
+        # run test #1
         actualModuleDict = p.getModule(moduleName)
         # asserts
         self.assertEqual(4, len(actualModuleDict[p.VARIABLE]))
@@ -876,23 +906,33 @@ class TestValidator(unittest.TestCase):
         self.assertEqual(configOutput2, actualModuleDict[p.VARIABLE][configOutput2])
         self.assertEqual(configOutput3Value, actualModuleDict[p.VARIABLE][configOutput3])
 
-        self.assertEqual(5, len(actualModuleDict[p.LOCALS]))
+        self.assertEqual(8, len(actualModuleDict[p.LOCALS]))
         self.assertEqual(varEnvironmentValue, actualModuleDict[p.LOCALS][localsEnv])
+        self.assertEqual(varEnvironmentValue, actualModuleDict[p.LOCALS][localsEnv2])
         self.assertEqual(localsVpcTypeValue, actualModuleDict[p.LOCALS][localsVpcType])
         self.assertEqual(localsEnvVpcIdValue, actualModuleDict[p.LOCALS][localsEnvVpcId])
+        self.assertEqual(localsEnvVpcIdValue2, actualModuleDict[p.LOCALS][localsEnvVpcId2])
         self.assertEqual(testVpcId, actualModuleDict[p.LOCALS][localsVpcId])
+        self.assertEqual(testVpcId, actualModuleDict[p.LOCALS][localsVpcId2])
         self.assertEqual("sf-pcas-analytics-test", actualModuleDict[p.LOCALS][localsSubmetNamePrefix])
 
-        self.assertEqual(2, len(actualModuleDict[p.OUTPUT]))
+        self.assertEqual(3, len(actualModuleDict[p.OUTPUT]))
         self.assertEqual("@{module.config.yada[test]}", actualModuleDict[p.OUTPUT][output1])
-        self.assertEqual(output2Value, actualModuleDict[p.OUTPUT][output2])
+        self.assertEqual("module@.config.yada[test]", actualModuleDict[p.OUTPUT][output2])
+        self.assertEqual(output3Value, actualModuleDict[p.OUTPUT][output3])
 
-        self.assertEqual(1, len(actualModuleDict[p.RESOURCE]))
+        self.assertEqual(2, len(actualModuleDict[p.RESOURCE]))
         actualResource = actualModuleDict[p.RESOURCE][resourceMyRoute]
         self.assertEqual(str(resourceMyRouteValue).replace('$', '@'), str(actualResource.config))
         self.assertEqual(mainFileName, actualResource.fileName)
         self.assertEqual(moduleName, actualResource.moduleName)
         self.assertEqual(resourceMyRoute, actualResource.name)
+
+        actualResource = actualModuleDict[p.RESOURCE][resourceMyRoute2]
+        self.assertEqual(str(resourceMyRouteValue2).replace('var.', 'var@.'), str(actualResource.config))
+        self.assertEqual(mainFileName, actualResource.fileName)
+        self.assertEqual(moduleName, actualResource.moduleName)
+        self.assertEqual(resourceMyRoute2, actualResource.name)
 
         p.passNumber = 2
 
@@ -905,23 +945,33 @@ class TestValidator(unittest.TestCase):
         self.assertEqual(configOutput2, actualModuleDict[p.VARIABLE][configOutput2])
         self.assertEqual(configOutput3Value, actualModuleDict[p.VARIABLE][configOutput3])
 
-        self.assertEqual(5, len(actualModuleDict[p.LOCALS]))
+        self.assertEqual(8, len(actualModuleDict[p.LOCALS]))
         self.assertEqual(varEnvironmentValue, actualModuleDict[p.LOCALS][localsEnv])
+        self.assertEqual(varEnvironmentValue, actualModuleDict[p.LOCALS][localsEnv2])
         self.assertEqual(localsVpcTypeValue, actualModuleDict[p.LOCALS][localsVpcType])
         self.assertEqual(localsEnvVpcIdValue, actualModuleDict[p.LOCALS][localsEnvVpcId])
+        self.assertEqual(localsEnvVpcIdValue2, actualModuleDict[p.LOCALS][localsEnvVpcId2])
         self.assertEqual(testVpcId, actualModuleDict[p.LOCALS][localsVpcId])
+        self.assertEqual(testVpcId, actualModuleDict[p.LOCALS][localsVpcId2])
         self.assertEqual("sf-pcas-analytics-test", actualModuleDict[p.LOCALS][localsSubmetNamePrefix])
 
-        self.assertEqual(2, len(actualModuleDict[p.OUTPUT]))
+        self.assertEqual(3, len(actualModuleDict[p.OUTPUT]))
         self.assertEqual("@{module.config.yada[test]}", actualModuleDict[p.OUTPUT][output1])
-        self.assertEqual(output2Value, actualModuleDict[p.OUTPUT][output2])
+        self.assertEqual("module@.config.yada[test]", actualModuleDict[p.OUTPUT][output2])
+        self.assertEqual(output3Value, actualModuleDict[p.OUTPUT][output3])
 
-        self.assertEqual(1, len(actualModuleDict[p.RESOURCE]))
+        self.assertEqual(2, len(actualModuleDict[p.RESOURCE]))
         actualResource = actualModuleDict[p.RESOURCE][resourceMyRoute]
         self.assertEqual(str(resourceMyRouteValue).replace('$', '@'), str(actualResource.config))
         self.assertEqual(mainFileName, actualResource.fileName)
         self.assertEqual(moduleName, actualResource.moduleName)
         self.assertEqual(resourceMyRoute, actualResource.name)
+
+        actualResource = actualModuleDict[p.RESOURCE][resourceMyRoute2]
+        self.assertEqual(str(resourceMyRouteValue2).replace('var.', 'var@.'), str(actualResource.config))
+        self.assertEqual(mainFileName, actualResource.fileName)
+        self.assertEqual(moduleName, actualResource.moduleName)
+        self.assertEqual(resourceMyRoute2, actualResource.name)
 
     def test_findModule(self):
         # initialize
@@ -940,23 +990,33 @@ class TestValidator(unittest.TestCase):
         self.assertEqual(configOutput2, actualModuleDict[p.VARIABLE][configOutput2])
         self.assertEqual(configOutput3Value, actualModuleDict[p.VARIABLE][configOutput3])
 
-        self.assertEqual(5, len(actualModuleDict[p.LOCALS]))
+        self.assertEqual(8, len(actualModuleDict[p.LOCALS]))
         self.assertEqual(varEnvironmentValue, actualModuleDict[p.LOCALS][localsEnv])
+        self.assertEqual(varEnvironmentValue, actualModuleDict[p.LOCALS][localsEnv2])
         self.assertEqual(localsVpcTypeValue, actualModuleDict[p.LOCALS][localsVpcType])
         self.assertEqual(localsEnvVpcIdValue, actualModuleDict[p.LOCALS][localsEnvVpcId])
+        self.assertEqual(localsEnvVpcIdValue2, actualModuleDict[p.LOCALS][localsEnvVpcId2])
         self.assertEqual(testVpcId, actualModuleDict[p.LOCALS][localsVpcId])
+        self.assertEqual(testVpcId, actualModuleDict[p.LOCALS][localsVpcId2])
         self.assertEqual("sf-pcas-analytics-test", actualModuleDict[p.LOCALS][localsSubmetNamePrefix])
 
-        self.assertEqual(2, len(actualModuleDict[p.OUTPUT]))
+        self.assertEqual(3, len(actualModuleDict[p.OUTPUT]))
         self.assertEqual("@{module.config.yada[test]}", actualModuleDict[p.OUTPUT][output1])
-        self.assertEqual(output2Value, actualModuleDict[p.OUTPUT][output2])
+        self.assertEqual("module@.config.yada[test]", actualModuleDict[p.OUTPUT][output2])
+        self.assertEqual(output3Value, actualModuleDict[p.OUTPUT][output3])
 
-        self.assertEqual(1, len(actualModuleDict[p.RESOURCE]))
+        self.assertEqual(2, len(actualModuleDict[p.RESOURCE]))
         actualResource = actualModuleDict[p.RESOURCE][resourceMyRoute]
         self.assertEqual(str(resourceMyRouteValue).replace('$', '@'), str(actualResource.config))
         self.assertEqual(mainFileName, actualResource.fileName)
         self.assertEqual(moduleName, actualResource.moduleName)
         self.assertEqual(resourceMyRoute, actualResource.name)
+
+        actualResource = actualModuleDict[p.RESOURCE][resourceMyRoute2]
+        self.assertEqual(str(resourceMyRouteValue2).replace('var.', 'var@.'), str(actualResource.config))
+        self.assertEqual(mainFileName, actualResource.fileName)
+        self.assertEqual(moduleName, actualResource.moduleName)
+        self.assertEqual(resourceMyRoute2, actualResource.name)
 
     def test_findModule_withDictToCopyFrom(self):
         # initialize
@@ -975,9 +1035,10 @@ class TestValidator(unittest.TestCase):
         self.assertEqual("test", actualModuleDict[p.VARIABLE]["env"])
         self.assertEqual(configVar1Value, actualModuleDict[p.VARIABLE][configVar1])
 
-        self.assertEqual(2, len(actualModuleDict[p.LOCALS]))
+        self.assertEqual(3, len(actualModuleDict[p.LOCALS]))
         self.assertEqual(configLocal1Value, actualModuleDict[p.LOCALS][configLocal1])
         self.assertEqual(testIP, actualModuleDict[p.LOCALS][configLocal2])
+        self.assertEqual(testIP, actualModuleDict[p.LOCALS][configLocal22])
 
         self.assertEqual(3, len(actualModuleDict[p.OUTPUT]))
         self.assertEqual(configOutput1, actualModuleDict[p.OUTPUT][configOutput1])
@@ -1006,23 +1067,33 @@ class TestValidator(unittest.TestCase):
         self.assertEqual(configOutput2, actualModuleDict[p.VARIABLE][configOutput2])
         self.assertEqual(configOutput3Value, actualModuleDict[p.VARIABLE][configOutput3])
 
-        self.assertEqual(5, len(actualModuleDict[p.LOCALS]))
+        self.assertEqual(8, len(actualModuleDict[p.LOCALS]))
         self.assertEqual(varEnvironmentValue, actualModuleDict[p.LOCALS][localsEnv])
+        self.assertEqual(varEnvironmentValue, actualModuleDict[p.LOCALS][localsEnv2])
         self.assertEqual(localsVpcTypeValue, actualModuleDict[p.LOCALS][localsVpcType])
         self.assertEqual(localsEnvVpcIdValue, actualModuleDict[p.LOCALS][localsEnvVpcId])
+        self.assertEqual(localsEnvVpcIdValue2, actualModuleDict[p.LOCALS][localsEnvVpcId2])
         self.assertEqual(testVpcId, actualModuleDict[p.LOCALS][localsVpcId])
+        self.assertEqual(testVpcId, actualModuleDict[p.LOCALS][localsVpcId2])
         self.assertEqual("sf-pcas-analytics-test", actualModuleDict[p.LOCALS][localsSubmetNamePrefix])
 
-        self.assertEqual(2, len(actualModuleDict[p.OUTPUT]))
+        self.assertEqual(3, len(actualModuleDict[p.OUTPUT]))
         self.assertEqual("@{module.config.yada[test]}", actualModuleDict[p.OUTPUT][output1])
-        self.assertEqual(output2Value, actualModuleDict[p.OUTPUT][output2])
+        self.assertEqual("module@.config.yada[test]", actualModuleDict[p.OUTPUT][output2])
+        self.assertEqual(output3Value, actualModuleDict[p.OUTPUT][output3])
 
-        self.assertEqual(1, len(actualModuleDict[p.RESOURCE]))
+        self.assertEqual(2, len(actualModuleDict[p.RESOURCE]))
         actualResource = actualModuleDict[p.RESOURCE][resourceMyRoute]
         self.assertEqual(str(resourceMyRouteValue).replace('$', '@'), str(actualResource.config))
         self.assertEqual(mainFileName, actualResource.fileName)
         self.assertEqual(moduleName, actualResource.moduleName)
         self.assertEqual(resourceMyRoute, actualResource.name)
+
+        actualResource = actualModuleDict[p.RESOURCE][resourceMyRoute2]
+        self.assertEqual(str(resourceMyRouteValue2).replace('var.', 'var@.'), str(actualResource.config))
+        self.assertEqual(mainFileName, actualResource.fileName)
+        self.assertEqual(moduleName, actualResource.moduleName)
+        self.assertEqual(resourceMyRoute2, actualResource.name)
 
     def test_loadModuleAttributes_nestedModule(self):
         # initialize
@@ -1061,23 +1132,33 @@ class TestValidator(unittest.TestCase):
         self.assertEqual(configOutput2, moduleDict[p.VARIABLE][configOutput2])
         self.assertEqual(configOutput3Value, moduleDict[p.VARIABLE][configOutput3])
 
-        self.assertEqual(5, len(moduleDict[p.LOCALS]))
+        self.assertEqual(8, len(moduleDict[p.LOCALS]))
         self.assertEqual(localsEnvValue, moduleDict[p.LOCALS][localsEnv])
+        self.assertEqual(localsEnvValue2, moduleDict[p.LOCALS][localsEnv2])
         self.assertEqual(localsVpcTypeValue, moduleDict[p.LOCALS][localsVpcType])
         self.assertEqual(localsEnvVpcIdValue, moduleDict[p.LOCALS][localsEnvVpcId])
         self.assertEqual(localsVpcIdValue, moduleDict[p.LOCALS][localsVpcId])
+        self.assertEqual(localsEnvVpcIdValue2, moduleDict[p.LOCALS][localsEnvVpcId2])
+        self.assertEqual(localsVpcIdValue2, moduleDict[p.LOCALS][localsVpcId2])
         self.assertEqual(localsSubmetNamePrefixValue, moduleDict[p.LOCALS][localsSubmetNamePrefix])
 
-        self.assertEqual(2, len(moduleDict[p.OUTPUT]))
+        self.assertEqual(3, len(moduleDict[p.OUTPUT]))
         self.assertEqual(output1Value, moduleDict[p.OUTPUT][output1])
         self.assertEqual(output2Value, moduleDict[p.OUTPUT][output2])
+        self.assertEqual(output3Value, moduleDict[p.OUTPUT][output3])
 
-        self.assertEqual(1, len(moduleDict[p.RESOURCE]))
+        self.assertEqual(2, len(moduleDict[p.RESOURCE]))
         actualResource = moduleDict[p.RESOURCE][resourceMyRoute]
         self.assertEqual(resourceMyRouteValue, actualResource.config)
         self.assertEqual(mainFileName, actualResource.fileName)
         self.assertEqual(moduleName, actualResource.moduleName)
         self.assertEqual(resourceMyRoute, actualResource.name)
+
+        actualResource = moduleDict[p.RESOURCE][resourceMyRoute2]
+        self.assertEqual(resourceMyRouteValue2, actualResource.config)
+        self.assertEqual(mainFileName, actualResource.fileName)
+        self.assertEqual(moduleName, actualResource.moduleName)
+        self.assertEqual(resourceMyRoute2, actualResource.name)
 
     def test_getSourcePath_Found(self):
         # initialize
@@ -1339,7 +1420,7 @@ class TestValidator(unittest.TestCase):
         # set up expected output
         expected = "@" + innerValue
         # run test
-        actual = p.resolveVariableLine(value, moduleName, True)
+        actual = p.resolveVariableLine(value, moduleName)
         # asserts
         self.assertEqual(expected, actual, "resolved variable line not as expected")
 
@@ -1360,7 +1441,7 @@ class TestValidator(unittest.TestCase):
         # set up expected output
         expected = newValue
         # run test
-        actual = p.resolveVariableLine(value, moduleName, True)
+        actual = p.resolveVariableLine(value, moduleName)
         # asserts
         self.assertEqual(expected, actual, "resolved variable line not as expected")
 
@@ -1384,7 +1465,7 @@ class TestValidator(unittest.TestCase):
         # set up expected output
         expected = "sf-core-" + newValue + "-yada"
         # run test
-        actual = p.resolveVariableLine(value, moduleName, True)
+        actual = p.resolveVariableLine(value, moduleName)
         # asserts
         self.assertEqual(expected, actual, "resolved variable line not as expected")
 
@@ -1416,13 +1497,14 @@ class TestValidator(unittest.TestCase):
         }
         p = terraform_validate.PreProcessor(jsonOutput)
         varName = "varName"
-        expectedValue = "var." + varName
-        value = "${yada[" + expectedValue + "]}"
+        bracketedValue = "var." + varName
+        value = "${yada[" + bracketedValue + "]}"
+        expectedBracketedValue = "var@." + varName
         moduleName = "inputModuleName"
         p.modulesDict = {}
         p.modulesDict[moduleName] = p.createModuleEntry(moduleName)
         # set up expected output
-        expected = (value, False)
+        expected = ("${yada[" + expectedBracketedValue + "]}", False)
         # run test
         actual = p.resolveVariable(value, moduleName, True)
         # asserts
@@ -1506,7 +1588,7 @@ class TestValidator(unittest.TestCase):
         # set up expected output
         expected = previouslyFoundVar
         # run test
-        actual = p.findVariable(value, True, False, previouslyFoundVar)
+        actual = p.findVariable(value, True, previouslyFoundVar)
         # asserts
         self.assertEqual(expected, actual, "found variable not as expected")
 
@@ -1517,12 +1599,12 @@ class TestValidator(unittest.TestCase):
             "errors": []
         }
         p = terraform_validate.PreProcessor(jsonOutput)
-        value = "yadaYadaYada"
-        previouslyFoundVar = "previouslyFoundVar"
+        value = ("yadaYadaYada", "somethingElse")
+        previouslyFoundVar = ("previouslyFoundVar", 0, 17, False, "var.", "var@.")
         # set up expected output
         expected = previouslyFoundVar
         # run test
-        actual = p.findVariable(value, True, False, previouslyFoundVar)
+        actual = p.findVariable(value, True, previouslyFoundVar)
         # asserts
         self.assertEqual(expected, actual, "found variable not as expected")
 
@@ -1534,11 +1616,10 @@ class TestValidator(unittest.TestCase):
         }
         p = terraform_validate.PreProcessor(jsonOutput)
         value = "${yadaYadaYada"
-        previouslyFoundVar = "previouslyFoundVar"
         # set up expected output
         expected = None
         # run test
-        actual = p.findVariable(value, True, False, previouslyFoundVar)
+        actual = p.findVariable(value, True)
         # asserts
         self.assertEqual(expected, actual, "found variable not as expected")
 
@@ -1550,11 +1631,10 @@ class TestValidator(unittest.TestCase):
         }
         p = terraform_validate.PreProcessor(jsonOutput)
         value = "[yadaYadaYada"
-        previouslyFoundVar = "previouslyFoundVar"
         # set up expected output
         expected = None
         # run test
-        actual = p.findVariable(value, True, True, previouslyFoundVar)
+        actual = p.findVariable(value, True)
         # asserts
         self.assertEqual(expected, actual, "found variable not as expected")
 
@@ -1566,11 +1646,10 @@ class TestValidator(unittest.TestCase):
         }
         p = terraform_validate.PreProcessor(jsonOutput)
         value = "${yadaYadaYada}"
-        previouslyFoundVar = "previouslyFoundVar"
         # set up expected output
-        expected = (value, 0, 15)
+        expected = (value, 0, 15, False, '${', '@{')
         # run test
-        actual = p.findVariable(value, True, False, previouslyFoundVar)
+        actual = p.findVariable(value, True)
         # asserts
         self.assertEqual(expected, actual, "found variable not as expected")
 
@@ -1582,11 +1661,10 @@ class TestValidator(unittest.TestCase):
         }
         p = terraform_validate.PreProcessor(jsonOutput)
         value = "${yadaYadaYada[nested]}"
-        previouslyFoundVar = "previouslyFoundVar"
         # set up expected output
-        expected = (value, 0, 23)
+        expected = (value, 0, 23, False, '${', '@{')
         # run test
-        actual = p.findVariable(value, False, False, previouslyFoundVar)
+        actual = p.findVariable(value, False)
         # asserts
         self.assertEqual(expected, actual, "found variable not as expected")
 
@@ -1599,11 +1677,10 @@ class TestValidator(unittest.TestCase):
         p = terraform_validate.PreProcessor(jsonOutput)
         nestedValue = "[nested]"
         value = "${yadaYadaYada" + nestedValue + "}"
-        previouslyFoundVar = "previouslyFoundVar"
         # set up expected output
-        expected = (nestedValue, 14, 22)
+        expected = (value, 0, 23, False, "${", "@{")
         # run test
-        actual = p.findVariable(value, True, False, previouslyFoundVar)
+        actual = p.findVariable(value, True)
         # asserts
         self.assertEqual(expected, actual, "found variable not as expected")
 
@@ -1652,7 +1729,7 @@ class TestValidator(unittest.TestCase):
         # asserts
         self.assertEqual(expected, actual, "delineators not as expected")
 
-    def test_findVariableDelineators_nestedFound(self):
+    def test_findVariableDelineators_nestedNotFound(self):
         # initialize
         jsonOutput = {
             "failures": [],
@@ -1662,6 +1739,21 @@ class TestValidator(unittest.TestCase):
         value = "${yadaYadaYada[@{somethingElse}]}"
         # set up expected output
         expected = 0, 33
+        # run test
+        actual = p.findVariableDelineators(value, "${", "}", "@{")
+        # asserts
+        self.assertEqual(expected, actual, "delineators not as expected")
+
+    def test_findVariableDelineators_nestedFound(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        value = "${yadaYadaYada[${somethingElse}]}"
+        # set up expected output
+        expected = 15, 31
         # run test
         actual = p.findVariableDelineators(value, "${", "}")
         # asserts
@@ -1680,7 +1772,7 @@ class TestValidator(unittest.TestCase):
         # set up expected output
         expected = newValue, moduleName, True
         # run test
-        actual = p.getReplacementValue(var, moduleName)
+        actual = p.getReplacementValue(var, moduleName, True)
         # asserts
         self.assertEqual(expected, actual, "replacement value not as expected")
 
@@ -1701,7 +1793,7 @@ class TestValidator(unittest.TestCase):
         # set up expected output
         expected = newValue, moduleName, True
         # run test
-        actual = p.getReplacementValue(var, moduleName)
+        actual = p.getReplacementValue(var, moduleName, True)
         # asserts
         self.assertEqual(expected, actual, "replacement value not as expected")
 
@@ -1721,7 +1813,7 @@ class TestValidator(unittest.TestCase):
         # set up expected output
         expected = var, moduleName, True
         # run test
-        actual = p.getReplacementValue(var, moduleName)
+        actual = p.getReplacementValue(var, moduleName, True)
         # asserts
         self.assertEqual(expected, actual, "replacement value not as expected")
 
@@ -1743,7 +1835,7 @@ class TestValidator(unittest.TestCase):
         # set up expected output
         expected = newValue, moduleName, True
         # run test
-        actual = p.getReplacementValue(var, moduleName)
+        actual = p.getReplacementValue(var, moduleName, True)
         # asserts
         self.assertEqual(expected, actual, "replacement value not as expected")
 
@@ -1764,7 +1856,7 @@ class TestValidator(unittest.TestCase):
         # set up expected output
         expected = newValue, moduleName, True
         # run test
-        actual = p.getReplacementValue(var, moduleName)
+        actual = p.getReplacementValue(var, moduleName, True)
         # asserts
         self.assertEqual(expected, actual, "replacement value not as expected")
 
@@ -1787,7 +1879,7 @@ class TestValidator(unittest.TestCase):
         # set up expected output
         expected = newValue, moduleName, True
         # run test
-        actual = p.getReplacementValue(var, inputModuleName)
+        actual = p.getReplacementValue(var, inputModuleName, True)
         # asserts
         self.assertEqual(expected, actual, "replacement value not as expected")
 
@@ -1812,7 +1904,7 @@ class TestValidator(unittest.TestCase):
         # set up expected output
         expected = newValue, moduleName, True
         # run test
-        actual = p.getReplacementValue(var, inputModuleName)
+        actual = p.getReplacementValue(var, inputModuleName, True)
         # asserts
         self.assertEqual(expected, actual, "replacement value not as expected")
 
@@ -1834,7 +1926,7 @@ class TestValidator(unittest.TestCase):
         # set up expected output
         expected = var, moduleName, True
         # run test
-        actual = p.getReplacementValue(var, inputModuleName)
+        actual = p.getReplacementValue(var, inputModuleName, True)
         # asserts
         self.assertEqual(expected, actual, "replacement value not as expected")
 

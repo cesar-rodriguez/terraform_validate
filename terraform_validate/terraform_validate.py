@@ -409,7 +409,7 @@ class PreProcessor:
     MODULE = "module"
     SOURCE = "source"
     DEFAULT = "default"
-    REGEX_HEREDOC_PATTERN = re.compile('<<\S+\r?\n')
+    REGEX_COLON_BRACKET = re.compile('.*:\s*\[.*', re.DOTALL)   # any characters : whitespace [ any characters
 
     def __init__(self, jsonOutput):
         self.jsonOutput = jsonOutput
@@ -419,16 +419,37 @@ class PreProcessor:
         self.fileNames = {}
         self.passNumber = 1
         self.dummyIndex = 0
-        # on 1st pass replace ${ with @{
-        # on 2nd pass replace ${ and @{ with !(
-        self.variableFind = "${"
-        self.variableErrorReplacement = "@{"
+        # on 1st pass replace var. with var$.
+        # on 2nd pass replace var. and var$. with var!.
+        self.braces = ["${", "@{", "!{"]
+        self.vars = ["var.", "var@.", "var!."]
+        self.locals = ["local.", "local@.", "local!."]
+        self.modules = ["module.", "module@.", "module!."]
+        self.terraform_workspaces = ["terraform.workspace", "terraform@.workspace", "terraform!.workspace"]
+        self.variableFind = [self.braces[0], self.vars[0], self.locals[0], self.modules[0], self.terraform_workspaces[0]]
+        self.variableErrorReplacement = [self.braces[1], self.vars[1], self.locals[1], self.modules[1], self.terraform_workspaces[1]]
+        self.variableErrorReplacementPass2 = [self.braces[2], self.vars[2], self.locals[2], self.modules[2], self.terraform_workspaces[2]]
 
     def process(self, path, variablesJsonFilename=None):
+        inputVars = {}
         if variablesJsonFilename is not None:
-            with open(variablesJsonFilename) as variablesJsonFile:
-                self.variablesFromCommandLine = json.load(variablesJsonFile)
+            for fileName in variablesJsonFilename:                
+                with codecs.open(fileName, 'r', encoding='utf8') as fp:
+                    try:
+                        variables_string = fp.read()
+                        inputVarsDict = hcl.loads(variables_string)
+                        inputVars = {**inputVars, **inputVarsDict}
+                    except:
+                        self.add_error_force(traceback.format_exc(), "---", fileName, "high")
 
+        # prefix any input variable not containing '.' with 'var.'
+        for var in inputVars:
+            if "." not in var:
+                newVar = "var." + var
+                self.variablesFromCommandLine[newVar] = inputVars[var]
+            else:
+                self.variablesFromCommandLine[var] = inputVars[var]
+                
         self.root = None
         self.readDir(path, self.hclDict)
 
@@ -439,7 +460,7 @@ class PreProcessor:
         logging.warning("------------------>>>starting pass 2...")
         self.passNumber = 2
         self.variableFind = self.variableErrorReplacement
-        self.variableErrorReplacement = "!{"
+        self.variableErrorReplacement = self.variableErrorReplacementPass2
         self.getAllModules(self.hclDict, False)
 
     def readDir(self, path, d):
@@ -461,14 +482,14 @@ class PreProcessor:
                     # terraform file (ends with .tf)
                     fileName = os.path.join(directory, file)
                     relativeFileName = fileName[len(path):]
-                    if os.path.getsize(fileName) != 0:
-                        with codecs.open(fileName, 'r', encoding='utf8') as fp:
-                            try:
-                                terraform_string = fp.read()
+                    with codecs.open(fileName, 'r', encoding='utf8') as fp:
+                        try:
+                            terraform_string = fp.read()
+                            if len(terraform_string.strip()) > 0:
                                 self.loadFileByDir(fileName, relativeFileName, d, d, terraform_string)
                                 self.fileNames[fileName] = fileName
-                            except:
-                                self.add_error(traceback.format_exc(), "---", fileName, "high")
+                        except:
+                            self.add_error_force(traceback.format_exc(), "---", fileName, "high")
 
     # load file by directory, marking each directory as a module and setting parent directories
     def loadFileByDir(self, fileName, path, hclSubDirDict, parentDir, terraform_string):
@@ -605,7 +626,8 @@ class PreProcessor:
                         moduleDict = self.createModuleEntry(dd[self.MODULE_NAME])
                         moduleDict[self.IS_MODULE] = True
                     self.loadModule(moduleName, dd, dictToCopyFrom)
-                    self.loadModule(dd[self.MODULE_NAME], dd, dictToCopyFrom)
+                    if moduleName != dd[self.MODULE_NAME]:
+                        self.loadModule(dd[self.MODULE_NAME], dd, dictToCopyFrom)
                     # source module found, replace variables and return it
                     m = self.loadModule(dd[self.MODULE_NAME], dd, dictToCopyFrom)
                     return m
@@ -629,7 +651,7 @@ class PreProcessor:
         return None
 
     def loadModule(self, moduleName, d, dictToCopyFrom):
-        self.logMsg("warning", ">>>loading module " + moduleName)
+        self.logMsgAlways("warning", ">>>loading module " + moduleName)
 
         moduleDict = self.modulesDict.get(moduleName)
         if moduleDict is None:
@@ -642,13 +664,37 @@ class PreProcessor:
             # add/replace the passed in variables to the module's variables
             for attr in dictToCopyFrom:
                 if attr != self.SOURCE:
-                    mdv[attr] = dictToCopyFrom[attr]
+                    # only replace on pass #1 if resolved
+                    if self.passNumber == 2 or self.isResolved(dictToCopyFrom[attr]):
+                        mdv[attr] = dictToCopyFrom[attr]
 
         # load all attributes for this module
         self.loadModuleAttributes(moduleName, d, moduleDict, None)
         # resolve variables for this module
         self.resolveVariablesInModule(moduleName, moduleDict)
         return moduleDict
+
+    def isResolved(self, var):
+        if type(var) is str:
+            return self.isStrResolved(var)
+        elif type(var) is dict:
+            for key in var:
+                if not self.isResolved(var[key]):
+                    return False
+        elif type(var) is list:
+            for value in var:
+                if not self.isResolved(value):
+                    return False
+        else:
+            return False
+        return True
+
+    def isStrResolved(self, var):
+        for varErrorReplacement in self.variableErrorReplacement:
+            if varErrorReplacement in var:
+                return False
+            
+        return True
 
     def createModuleEntry(self, moduleName):
         self.modulesDict[moduleName] = {}
@@ -675,10 +721,14 @@ class PreProcessor:
                 if key == self.LOCALS:
                     # get values for all local variables
                     for local in value:
-                        moduleDict[self.LOCALS][local] = value[local]
+                        # only replace on first pass or not already fully resolved
+                        if self.passNumber == 1 or self.containsVariable(moduleDict[self.LOCALS][local]):
+                            moduleDict[self.LOCALS][local] = value[local]
                 elif key == self.OUTPUT:
                     for output in value:
-                        moduleDict[self.OUTPUT][output] = value[output][self.VALUE]
+                        # only replace on first pass or not already fully resolved
+                        if self.passNumber == 1 or self.containsVariable(moduleDict[self.OUTPUT][output]):
+                            moduleDict[self.OUTPUT][output] = value[output][self.VALUE]
                 elif key == self.RESOURCE:
                     if self.passNumber == 1:
                         for resourceType in value:
@@ -687,10 +737,19 @@ class PreProcessor:
                                 config = resourceNames[resourceName]
                                 moduleDict[self.RESOURCE][resourceName] = TerraformResource(resourceType, resourceName, config, d[self.FILE_NAME], moduleName)
                 elif key == self.VARIABLE:
-                    # initialize any default values for variables
-                    for variable in value:
-                        if value[variable].get(self.DEFAULT) is not None:
-                            moduleDict[self.VARIABLE][variable] = value[variable][self.DEFAULT]
+                    '''
+                    value could be a string as in below case
+                        condition {
+                            test = "ArnEquals"
+                            variable = "aws:SourceArn"
+                            values = ["${var.services_entry_arn}"]
+                        }
+                    '''
+                    if type(value) is dict:
+                        # initialize any default values for variables
+                        for variable in value:
+                            if value[variable].get(self.DEFAULT) is not None:
+                                moduleDict[self.VARIABLE][variable] = value[variable][self.DEFAULT]
                 elif key == self.MODULE:
                     # loop through all modules
                     for mn in value:
@@ -699,7 +758,7 @@ class PreProcessor:
                             if parameter != self.SOURCE:
                                 replacementValue = self.resolveVariableByType(value[mn][parameter], moduleName)
                                 if replacementValue != value[mn][parameter]:
-                                    self.logMsg("warning", "replaced module " + mn + " parameter " + parameter + " value " + str(value[mn][parameter]) + " with " + str(replacementValue))
+                                    self.logMsgAlways("warning", "replaced module " + mn + " parameter " + parameter + " value " + str(value[mn][parameter]) + " with " + str(replacementValue))
                                     value[mn][parameter] = replacementValue
                         # get defined module; load it if not already there
                         md = self.getModule(mn, False, value[mn], tfDict)
@@ -748,21 +807,21 @@ class PreProcessor:
             replacementValue = self.resolveVariableByType(value, moduleName)
             moduleDict[self.VARIABLE][key] = replacementValue
             if replacementValue != value:
-                self.logMsg("warning", "replaced variable " + key + " value " + str(value) + " with " + str(replacementValue))
+                self.logMsgAlways("warning", "replaced variable " + key + " value " + str(value) + " with " + str(replacementValue))
         # resolve locals
         for key in moduleDict[self.LOCALS]:
             value = moduleDict[self.LOCALS][key]
             replacementValue = self.resolveVariableByType(value, moduleName)
             moduleDict[self.LOCALS][key] = replacementValue
             if replacementValue != value:
-                self.logMsg("warning", "replaced local variable " + key + " value " + str(value) + " with " + str(replacementValue))
+                self.logMsgAlways("warning", "replaced local variable " + key + " value " + str(value) + " with " + str(replacementValue))
         # resolve outputs
         for key in moduleDict[self.OUTPUT]:
             value = moduleDict[self.OUTPUT][key]
             replacementValue = self.resolveVariableByType(value, moduleName)
             moduleDict[self.OUTPUT][key] = replacementValue
             if replacementValue != value:
-                self.logMsg("warning", "replaced output variable " + key + " value " + str(value) + " with " + str(replacementValue))
+                self.logMsgAlways("warning", "replaced output variable " + key + " value " + str(value) + " with " + str(replacementValue))
         # resolve resources
         self.shouldLogErrors = True
         for key in moduleDict[self.RESOURCE]:
@@ -770,11 +829,11 @@ class PreProcessor:
             replacementValue = self.resolveVariableByType(value, moduleName)
             moduleDict[self.RESOURCE][key].config = replacementValue
             if replacementValue != value:
-                self.logMsg("warning", "replaced resource variable " + key + " value " + str(value) + " with " + str(replacementValue))
+                self.logMsgAlways("warning", "replaced resource variable " + key + " value " + str(value) + " with " + str(replacementValue))
 
     def resolveVariableByType(self, value, moduleName):
         if type(value) is str:
-            return self.resolveVariableLine(value, moduleName, True)
+            return self.resolveVariableLine(value, moduleName)
         elif type(value) is dict:
             return self.resolveDictVariable(value, moduleName)
         elif type(value) is list:
@@ -810,188 +869,350 @@ class PreProcessor:
         return False
 
     # resolve entire variable
-    def resolveVariableLine(self, value, moduleName, findShouldRecurse, dictToCopyFrom=None, tfDict=None):
-        # find variable (not in brackets)
-        t = self.findVariable(value, False, False, None)
-        if t is None:
+    def resolveVariableLine(self, value, moduleName):
+        if not self.containsVariable(value):
             return value
         # a variable needs to be replaced
+        t = self.findVariable(value, True)
         var = t[0]
         b = t[1]
         e = t[2]
-        rv = self.resolveVariable(var, moduleName, findShouldRecurse, dictToCopyFrom, tfDict)
-        if b == 0 and e == len(value):
+        if var.startswith("["):
+            var = var[1:len(var)-1]            
+        rv = self.resolveVariable(var, moduleName)
+        if b == 0 and (e == len(value) or e == -1):
             # full replacement; don't merge since a string may not have been returned
             newValue = rv[0]
         else:
             newValue = value[:b] + str(rv[0]) + value[e:]
-        findShouldRecurse = rv[1]
-
-        # recursively resolve the variables since there may be more than one variable in this variable
-        return self.resolveVariableLine(newValue, moduleName, findShouldRecurse)
+        # recursively resolve the variables since there may be more than one variable in this value
+        return self.resolveVariableByType(newValue, moduleName)
 
     # resolve innermost variable
-    def resolveVariable(self, value, moduleName, findShouldRecurse, dictToCopyFrom=None, tfDict=None):
+    def resolveVariable(self, value, moduleName, dictToCopyFrom=None, tfDict=None):
         # find variable (possibly in brackets)
-        t = self.findVariable(value, findShouldRecurse, False, None)
-        v = t[0]
-        b = t[1]
-        e = t[2]
-        isDollarBrace = v.startswith(self.variableFind)
-        if isDollarBrace:
-            # inside ${}
-            var = v[2:len(v)-1]
+        isOldTFvarStyle=False
+        v, b, e, insideBrackets, foundDelineator, foundDelineatorErrRepl = self.findVariable(value, False)
+        if len(v) > 1 and v[1] == "{":
+            isOldTFvarStyle = True
+        if not insideBrackets and isOldTFvarStyle:
+            # inside ${}; remove them
+            var = value[2:e-1]
         else:
-            # inside []
-            var = v[1:len(v)-1]
+            var = v
         # update moduleName in case we switch modules and need to recurse more
-        replacementValue, moduleName, isHandledType = self.getReplacementValue(var, moduleName, dictToCopyFrom, tfDict)
+        replacementValue, moduleName, isHandledType = self.getReplacementValue(var, moduleName, isOldTFvarStyle, dictToCopyFrom, tfDict)
         if replacementValue == var:
             # couldn't find a replacement; change to our notation to mark it
-            if isDollarBrace:
-                if isHandledType:
-                    self.logMsg("error", "Couldn't find a replacement for: " + var + " in " + moduleName)
-                else:
-                    self.logMsg("debug", "Couldn't find a replacement for: " + var + " in " + moduleName)
-                replacementValue = value[:b] + self.variableErrorReplacement + var + value[e-1:]
+            if isHandledType:
+                self.logMsg("error", "Couldn't find a replacement for: " + self.getOrigVar(var) + " in " + moduleName)
             else:
-                # ignore if inside brackets
-                replacementValue = value[:b+1] + var + value[e-1:]
-            return (replacementValue, isDollarBrace)
+                self.logMsg("debug", "Couldn't find a replacement for: " + self.getOrigVar(var) + " in " + moduleName)
+            if not isOldTFvarStyle:
+                # strip off replaceable variable
+                var = var[len(foundDelineator):]
+            replacementValue = value[:b] + foundDelineatorErrRepl + var
+            if insideBrackets:
+                replacementValue += "]"
+            if not isOldTFvarStyle and len(value) > 1 and value[1] == "{":
+                replacementValue += "}"
+            if isOldTFvarStyle and e > 0:
+                # remove closing brace
+                replacementValue += value[e-1:]
+            return (replacementValue, not insideBrackets)
 
         if type(replacementValue) is str:
-            if isDollarBrace:
+            if insideBrackets:
+                self.logMsgAlways("info", "  replacing [" + var + "] with " + replacementValue)
+                # resolve the variable again since the replacement may also contain variables
+                return (value[:b] + self.resolveVariableLine(replacementValue, moduleName) + value[e:], not insideBrackets)
+            else:
                 if v == replacementValue:
                     # this prevents a loop
-                    replacementValue = replacementValue.replace(self.variableFind, self.variableErrorReplacement, 1)
-                    self.logMsg("debug", "Couldn't find a replacement for: " + var + " (would have looped) in " + moduleName)
+                    replacementValue = replacementValue.replace(foundDelineator, foundDelineatorErrRepl, 1)
+                    self.logMsg("debug", "Couldn't find a replacement for: " + self.getOrigVar(var) + " (would have looped) in " + moduleName)
                 else:
-                    self.logMsg("info", "  replacing ${" + var + "} with " + replacementValue)
+                    self.logMsgAlways("info", "  replacing ${" + var + "} with " + replacementValue)
                     # resolve the variable again since the replacement may also contain variables
-                    return (self.resolveVariableLine(replacementValue, moduleName, findShouldRecurse), isDollarBrace)
-            else:
-                self.logMsg("info", "  replacing [" + var + "] with " + replacementValue)
-                b += 1
-                e -= 1
-                # resolve the variable again since the replacement may also contain variables
-                return (value[:b] + self.resolveVariableLine(replacementValue, moduleName, findShouldRecurse) + value[e:], isDollarBrace)
+                    return (self.resolveVariableLine(replacementValue, moduleName), not insideBrackets)
+        elif type(replacementValue) is int:
+            self.logMsgAlways("info", "  replacing ${" + var + "} with " + str(replacementValue))
         elif type(replacementValue) is dict:
-            bb = var.find("[")
+            bb = value.find("[")
             if bb == -1:
                 # assume a dictionary is expected as replacement value
-                self.logMsg("info", "  replacing ${" + var + "} with " + str(replacementValue))
-                return (replacementValue, isDollarBrace)
-            ee = var.find("]", bb)
+                if isOldTFvarStyle:
+                    self.logMsgAlways("info", "  replacing ${" + value + "} with " + str(replacementValue))
+                else:
+                    self.logMsgAlways("info", "  replacing " + value + " with " + str(replacementValue))
+                return (replacementValue, not insideBrackets)
+            ee = value.find("]", bb)
             if ee == -1:
-                self.add_error("Couldn't find ] for dictionary entry in replacement variable: " + var, moduleName, "---", "high")
-                return (self.variableErrorReplacement + var + "}", isDollarBrace)
-            vn = var[bb+1:ee]
-            replacementValue = replacementValue.get(vn, self.variableErrorReplacement + var + "}#[" + vn + "]")
-            if self.variableErrorReplacement[:1] in str(replacementValue):
-                self.logMsg("debug", "Couldn't find a replacement (2) for: " + var + " in " + moduleName)
+                self.add_error("Couldn't find ] for dictionary entry in replacement variable: " + value, moduleName, "---", "high")
+                return (foundDelineatorErrRepl + value + "}", not insideBrackets)
+            vn = value[bb+1:ee]
+            if isOldTFvarStyle:
+                replacementValue = replacementValue.get(vn, foundDelineatorErrRepl + value[len(foundDelineator):])
+            else:
+                replacementValue = replacementValue.get(vn, foundDelineatorErrRepl + value[len(foundDelineator):])
+            if replacementValue is str and replacementValue.startswith(foundDelineatorErrRepl):
+                self.logMsg("debug", "Couldn't find a replacement (2) for: " + self.getOrigVar(value) + " in " + moduleName)
             if type(replacementValue) is list:
                 replacementValue = str(replacementValue)
-                self.logMsg("info", "  replacing ${" + var + "}[" + vn + "] with " + replacementValue)
+                if isOldTFvarStyle:
+                    self.logMsgAlways("info", "  replacing " + foundDelineator + value + "}[" + vn + "] with " + replacementValue)
+                else:
+                    self.logMsgAlways("info", "  replacing " + value + " with " + replacementValue)
 
         if type(replacementValue) is list:
             replacementValue = str(replacementValue)
-            self.logMsg("info", "  replacing ${" + var + "} with " + replacementValue)
+            if isOldTFvarStyle:
+                self.logMsgAlways("info", "  replacing " + foundDelineator + var + "} with " + replacementValue)
+            else:
+                self.logMsgAlways("info", "  replacing " + var + " with " + replacementValue)
 
-        return (replacementValue, isDollarBrace)
+        return (replacementValue, not insideBrackets)
+
+    def getOrigVar(self, var):
+        if var.startswith(self.vars[1]) or var.startswith(self.vars[2]):
+            return self.vars[0] + var[len(self.vars[1]):]
+        elif var.startswith(self.locals[1]) or var.startswith(self.locals[2]):
+            return self.locals[0] + var[len(self.locals[1]):]
+        elif var.startswith(self.modules[1]) or var.startswith(self.modules[2]):
+            return self.modules[0] + var[len(self.modules[1]):]
+        else:
+            return var
+
+    # check if given value contains a variable anywhere
+    def containsVariable(self, value):
+        t = self.containsVariableByType(value)
+        if t[0] != -1:
+            return True
+        return False
+
+    def containsVariableByType(self, value):
+        if type(value) is str:
+            return self.findVariableDelineatorsForVars(value, False)
+        elif type(value) is dict:
+            return self.containsVariableDict(value)
+        elif type(value) is list:
+            return self.containsVariableList(value)
+        else:
+            # not a variable
+            return (-1, 0)
+
+    def containsVariableDict(self, value):
+        returnValue = {}
+        for key in value:
+            returnValue[key] = self.containsVariableByType(value[key])
+        # check all returned values
+        for key in returnValue:
+            if returnValue[key][0] != -1:
+                # variable found
+                return (1, 0)
+        # no variables found
+        return (-1, 0)
+
+    def containsVariableList(self, value):
+        index = 0
+        for v in value:
+            value[index] = self.containsVariableByType(v)
+            index += 1
+        # check all returned values
+        for v in value:
+            if v[0] != -1:
+                # variable found
+                return (1, 0)
+        # no variables found
+        return (-1, 0)
 
     # find deepest nested variable in given value
-    def findVariable(self, value, shouldRecurse, isNested, previouslyFoundVar):
+    def findVariable(self, value, isNested, previouslyFoundVar=None):
         # pass 1: if unreplaceable, change $ to @
         # pass 2: if unreplaceable, change both $ & @ to !
         if type(value) is str:
-            isDollarBrace = False
-            b, e = self.findVariableDelineators(value, self.variableFind, "}")
-            if b > -1:
-                isDollarBrace = True
+            isVar = False
+            val = value
+            if previouslyFoundVar:
+                insideBrackets = previouslyFoundVar[3]
+            else:
+                insideBrackets = False
+            if isNested and type(previouslyFoundVar) is str and "{" in previouslyFoundVar[0]:
+                # if this is a nested call and the outer call found ${, only look for the brace now
+                braceOnly = True
+            else:
+                braceOnly = False
+ 
+            b, e, foundDelineator, foundDelineatorErrRepl = self.findVariableDelineatorsForVars(val, braceOnly)
+            if b == -1:
+                return None                
+            if b > 0:
+                partial = value[:b]
+                if partial[len(partial)-1] == "[":
+                    # open bracket found before the variable
+                    insideBrackets = True
+                    partial = value[b:e]
+                    if partial[len(partial)-1] == "]":
+                        # close bracket found after the variable, remove from variable end
+                        e -= 1
+                
+            isVar = True
+            if "{" in foundDelineator:
                 if e == -1:
                     # problem
                     self.add_error("Matching close brace not found: " + value, "---", "---", "high")
                     return None
-            elif isNested:
-                # only look for brackets if nested inside ${}
-                b, e = self.findVariableDelineators(value, "[", "]")
-                if b == -1:
-                    return previouslyFoundVar
-                if e == -1:
-                    # problem
-                    self.add_error("Matching close square bracket not found: " + value, "---", "---", "high")
-                    return None
+                foundVar = (value[b:e], b, e, insideBrackets, foundDelineator, foundDelineatorErrRepl)
             else:
-                return previouslyFoundVar
-            foundVar = (value[b:e], b, e)
-            # recursively find variable to find brackets nested inside braces
+                foundVar = (value[b:e], b, e, insideBrackets, foundDelineator, foundDelineatorErrRepl)
+            
             newSearchValue = foundVar[0]
-            if isDollarBrace:
-                newSearchValue = newSearchValue[2:len(newSearchValue)-1]
+            if isVar:
+                # remove delineator(s)
+                if newSearchValue.endswith("}"):
+                    newSearchValue = newSearchValue[2:len(newSearchValue)-1]
+                else:
+                    newSearchValue = newSearchValue[len(foundDelineator):]
             else:
                 newSearchValue = newSearchValue[1:len(newSearchValue)-1]
-                # adjust beginning & ending since nested inside previouslyFoundVar
-                b += 2
-                e += 2
-                foundVar = (foundVar[0], b, e)
-            if shouldRecurse:
-                return self.findVariable(newSearchValue, True, True, foundVar)
+                if not insideBrackets:
+                    # adjust beginning & ending since nested inside previouslyFoundVar
+                    fv_length = len(previouslyFoundVar[4])
+                    b += fv_length
+                    e += fv_length
+                foundVar = (newSearchValue, b, e, insideBrackets, foundDelineator, foundDelineatorErrRepl)
+            if newSearchValue not in self.terraform_workspaces[0]:
+                # recursively find variable
+                fv = self.findVariable(newSearchValue, True, foundVar)
+                if fv is None:
+                    # no variable found
+                    return foundVar
+                if foundVar[0].endswith("}") and fv[1] == 0 and fv[2] == len(newSearchValue):
+                    # return originally found variable which is the old style
+                    return foundVar
+                if insideBrackets:
+                    # use beginning & ending from previous
+                    fv = (fv[0], b, e, fv[3], fv[4], fv[5])
+                return fv
             else:
                 return foundVar
         return previouslyFoundVar
 
-    def findVariableDelineators(self, value, open, close):
-        b = value.rfind(open)
+    def findVariableDelineatorsForVars(self, value, braceOnly):
+        if braceOnly and value not in self.terraform_workspaces:
+            b, e = self.findVariableDelineators(value, self.variableFind[0], "}", self.variableErrorReplacement[0])
+            if b > -1:
+                return b, e, self.variableFind[0], self.variableErrorReplacement[0]
+        else:
+            prevB = -1
+            for varPrefix, varErrorReplacement in zip(self.variableFind, self.variableErrorReplacement):
+                if varPrefix[1] == "{":
+                    closeVar = "}"
+                else:
+                    closeVar = None
+                b, e = self.findVariableDelineators(value, varPrefix, closeVar, varErrorReplacement)
+                if b > -1:
+                    if closeVar != None or b == 0 or (value[b-1] != "{"):
+                        if b > prevB:
+                            prevB = b;
+                            prevE = e
+                            prevVarPrefix = varPrefix
+                            prevVarErrorReplacement = varErrorReplacement
+            if prevB != -1:
+                return prevB, prevE, prevVarPrefix, prevVarErrorReplacement
+        return -1, 0, None, None
+
+    def findVariableDelineators(self, value, openVar, closeVar, varErrorReplacement=None):
+        '''
+        This is valid:  name-prefix = "sf-${module.common.account_name}-${local.pcas_vpc_type}-${local.env}-${module.common.region}"
+        This is not:    name-prefix = "sf-module.common.account_name-local.pcas_vpc_type-local.env-module.common.region"
+        i.e. if combining variables into one variable, must use old ${} variable style
+        '''
+        b = value.rfind(openVar)
         if b == -1:
             return -1, 0
+        if openVar == "[":
+            # check if preceeded by :
+            matchObject = self.REGEX_COLON_BRACKET.search(value)
+            if matchObject != None:
+                return -1, 0
+        if closeVar == None:
+            # search for default "closeVars"
+            defaultCloseVars = [",", ")", "}"]
+            prevE = 99999
+            for closeVar in defaultCloseVars:
+                e = value.find(closeVar, b)
+                if e != -1 and e < prevE:
+                    prevE = e
+            if prevE != 99999:
+                return b, prevE
+            # no close value found, use length of value
+            return b, len(value)
         v = value[b+1:]
         nested = 0
-        for i, c in enumerate(v):
-            if c == close:
+        for index, char in enumerate(v):
+            if char == closeVar:
                 if nested == 0:
-                    return b, b+i+2
+                    return b, b+index+2
                 # just closed a nested variable
                 nested -= 1
-            if v[i:i+len(open)] == open or (len(open) == 2 and v[i:i+2] == self.variableErrorReplacement):
+            if v[index:index+len(openVar)] == openVar or (varErrorReplacement != None and len(v) >= index+len(varErrorReplacement) and v[index:index+len(varErrorReplacement)] == varErrorReplacement):
                 # start of a nested variable
                 nested += 1
-        # error: matching close not found
+        # error: matching closeVar not found
         return 0, -1
 
     # find replacement value for given var in given moduleName
-    def getReplacementValue(self, var, moduleName, dictToCopyFrom=None, tfDict=None):
+    def getReplacementValue(self, var, moduleName, isOldTFvarStyle, dictToCopyFrom=None, tfDict=None):
         replacementValue = None
         if var.startswith('"') and var.endswith('"'):
             return var[1:len(var)-1], moduleName, True
-        e = var.find("[")
-        if e != -1:
-            v = var[:e]
+        subscript = None
+        b = var.find("[")
+        if b != -1:
+            v = var[:b]
+            e = var.find("]", b)
+            if e != -1:
+                subscript = var[b+1:e]
+                v += var[e+1:]
+                if subscript[0] == '"' or subscript[0] == "'":
+                    # remove quotes
+                    subscript = subscript[1:len(subscript)-1]
         else:
             v = var
 
         isHandledType = False
         notHandled = ["?", "==", "!=", ">", "<", ">=", "<=", "&&", "||", "!", "+", "-", "*", "/", "%"]
         moduleDict = self.modulesDict[moduleName]
-        if var.startswith("var."):
+        if isOldTFvarStyle:
+            varIndex = 0
+        else:
+            varIndex = self.passNumber - 1
+        if var.startswith(self.vars[varIndex]):
             # conditional statements, boolean statements, and math are not currently handled
             if not any(x in var for x in notHandled):
                 isHandledType = True
-            v = v[4:]
+            v = v[len(self.vars[varIndex]):]
+            index = v.find('.')
+            if index > -1:
+                subscript = v[index+1:]
+                v = v[:index]
             replacementValue = moduleDict[self.VARIABLE].get(v)
-        elif var.startswith("local."):
+        elif var.startswith(self.locals[varIndex]):
             if not any(x in var for x in notHandled):
                 isHandledType = True
-            v = v[6:]
+            v = v[len(self.locals[varIndex]):]
             replacementValue = moduleDict[self.LOCALS].get(v)
-        elif var.startswith("module."):
+        elif var.startswith(self.modules[varIndex]):
             if not any(x in var for x in notHandled):
                 isHandledType = True
             # variable is in a different module
-            e = v.find(".", 7)
+            modulePrefixLength = len(self.modules[varIndex])
+            e = v.find(".", modulePrefixLength)
             if e == -1:
                 self.add_error("Error Resolving module variable: " + var + "  expected ending '.' not found", moduleName, "---", "high")
             else:
-                moduleName = v[7:e]
+                moduleName = v[modulePrefixLength:e]
                 md = self.getModule(moduleName, True, dictToCopyFrom, tfDict)
                 moduleOutputDict = md[self.OUTPUT]
                 e += 1
@@ -1007,9 +1228,14 @@ class PreProcessor:
                     replacementValue = moduleOutputDict.get(self.VALUE, moduleOutputDict)
                 else:
                     replacementValue = moduleOutputDict
+        elif var == self.terraform_workspaces[varIndex]:
+            isHandledType = True
 
-        if type(replacementValue) is dict and len(replacementValue) == 0:
-            replacementValue = None
+        if type(replacementValue) is dict:
+            if len(replacementValue) == 0:
+                replacementValue = None
+            elif subscript != None:
+                replacementValue = replacementValue[subscript]
 
         if replacementValue is None:
             replacementValue = self.variablesFromCommandLine.get(var, var)
@@ -1035,7 +1261,10 @@ class PreProcessor:
     # add given error in given fileName
     def add_error(self, error, moduleName, fileName, severity):
         if self.passNumber == 2 and self.shouldLogErrors:
-            self.jsonOutput["errors"].append( self.getFailureMsg(severity, error, moduleName, fileName) )
+            self.add_error_force(error, moduleName, fileName, severity)
+
+    def add_error_force(self, error, moduleName, fileName, severity):
+        self.jsonOutput["errors"].append( self.getFailureMsg(severity, error, moduleName, fileName) )
 
     def getFailureMsg(self, severity, msg, moduleName, fileName):
         message = {}
@@ -1047,11 +1276,14 @@ class PreProcessor:
 
     def logMsg(self, type, msg):
         if self.passNumber == 2:
-            if type == "error":
-                logging.error(msg)
-            elif type == "warning":
-                logging.warning(msg)
-            elif type == "info":
-                logging.info(msg)
-            elif type == "debug":
-                logging.debug(msg)
+            self.logMsgAlways(type, msg)
+
+    def logMsgAlways(self, type, msg):
+        if type == "error":
+            logging.error(msg)
+        elif type == "warning":
+            logging.warning(msg)
+        elif type == "info":
+            logging.info(msg)
+        elif type == "debug":
+            logging.debug(msg)

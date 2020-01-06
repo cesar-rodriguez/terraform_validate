@@ -4,8 +4,8 @@ import terraform_validate
 from terraform_validate import TerraformResource
 
 
-def getMsg(severity, msg, fileName, moduleName):
-    return {'severity': severity, 'message': msg, 'moduleName': moduleName, 'fileName': fileName}
+def getMsg(severity, waived, msg, fileName, moduleName):
+    return {'severity': severity, 'waived': waived, 'message': msg, 'moduleName': moduleName, 'fileName': fileName}
 
 
 def createModule(p, parent, moduleName):
@@ -55,13 +55,16 @@ def addResource(resources, name, type, config, fileName, moduleName):
 ###############################################################
 # Preprocessor helpers/data
 ###############################################################
-def getValidator(resources):
+def getValidator(resources, isRuleOverridden=False):
     jsonOutput = {
         "failures": [],
         "errors": []
     }
     v = terraform_validate.Validator()
     v.preprocessor = terraform_validate.PreProcessor(jsonOutput)
+    v.isRuleOverridden = isRuleOverridden
+    if not isRuleOverridden:
+        v.overrides = []
     terraform = {}
     terraform['resource'] = resources
     v.setTerraform(terraform)
@@ -248,7 +251,7 @@ class TestValidator(unittest.TestCase):
         v.error_if_property_missing()
         # set up expected outputs
         expectedFailures = []
-        expectedFailures.append( getMsg("high", "[" + resourceType + "." + resourceName + "] should have property: 'xyz'", fileName, moduleName) )
+        expectedFailures.append( getMsg("high", "", "[" + resourceType + "." + resourceName + "] should have property: 'xyz'", fileName, moduleName) )
         expectedErrors = []
         # run test
         v.resources('aws_instance').property('xyz').property('encrypted').should_equal(True)
@@ -269,8 +272,8 @@ class TestValidator(unittest.TestCase):
         v = getValidator(resources)
         # set up expected outputs
         expectedFailures = []
-        expectedFailures.append( getMsg("high", "[" + resourceType + "." + resourceName1 + "." + propertyName + "] should be '1'. Is: '2'", fileName, moduleName) )
-        expectedFailures.append( getMsg("high", "[" + resourceType + "." + resourceName2 + "." + propertyName + "] should be '2'. Is: '1'", fileName, moduleName) )
+        expectedFailures.append( getMsg("high",  "", "[" + resourceType + "." + resourceName1 + "." + propertyName + "] should be '1'. Is: '2'", fileName, moduleName) )
+        expectedFailures.append( getMsg("high",  "", "[" + resourceType + "." + resourceName2 + "." + propertyName + "] should be '2'. Is: '1'", fileName, moduleName) )
         expectedErrors = []
         # run test
         v.resources(resourceType).property(propertyName).should_equal(1)
@@ -308,7 +311,7 @@ class TestValidator(unittest.TestCase):
         v = getValidator(resources)
         # set up expected outputs
         expectedFailures = []
-        expectedFailures.append( getMsg("high", "[" + resourceType + "." + resourceName + "." + propertyName + "] should not be 'http'. Is: 'http'", fileName, moduleName) )
+        expectedFailures.append( getMsg("high", "", "[" + resourceType + "." + resourceName + "." + propertyName + "] should not be 'http'. Is: 'http'", fileName, moduleName) )
         expectedErrors = []
         # run test
         v.resources(resourceType).property(propertyName).should_not_equal('http')
@@ -327,10 +330,45 @@ class TestValidator(unittest.TestCase):
         v = getValidator(resources)
         # set up expected outputs
         expectedFailures = []
-        expectedFailures.append( getMsg("high", "[" + resourceType + "." + resourceName + "." + propertyName + "] should not be 'http'. Is: 'hTTp'", fileName, moduleName) )
+        expectedFailures.append( getMsg("high", "", "[" + resourceType + "." + resourceName + "." + propertyName + "] should not be 'http'. Is: 'hTTp'", fileName, moduleName) )
         expectedErrors = []
         # run test
         v.resources(resourceType).property(propertyName).should_not_equal_case_insensitive('http')
+        # asserts
+        assertFailuresAndErrors(self, v, expectedFailures, expectedErrors)
+
+    def test_get_terraform_property_should_contain_any(self):
+        # initialize
+        resourceName = 'emr-master-ingress-self'
+        resourceType = 'aws_security_group_rule'
+        moduleName = 'someModule'
+        fileName = 'none.tf'
+        resources = {}
+        addResource(resources, resourceName, resourceType, {'type': 'ingress', 'from_port': 0, 'to_port': 65535, 'protocol': 'tcp', 'cidr_blocks': 'xyz'}, fileName, moduleName)
+        v = getValidator(resources)
+        # set up expected outputs
+        expectedFailures = []
+        expectedErrors = []
+        # run test
+        v.resources('aws_security_group_rule').with_property('type', 'ingress').property('cidr_blocks').list_should_contain_any(['abc', 'xyz'])
+        # asserts
+        assertFailuresAndErrors(self, v, expectedFailures, expectedErrors)
+
+    def test_get_terraform_property_should_contain_any_fails(self):
+        # initialize
+        resourceName = 'emr-master-ingress-self'
+        resourceType = 'aws_security_group_rule'
+        moduleName = 'someModule'
+        fileName = 'none.tf'
+        resources = {}
+        addResource(resources, resourceName, resourceType, {'type': 'ingress', 'from_port': 0, 'to_port': 65535, 'protocol': 'tcp', 'cidr_blocks': ['0.0.0.0/0']}, fileName, moduleName)
+        v = getValidator(resources)
+        # set up expected outputs
+        expectedFailures = []
+        expectedFailures.append( getMsg("high", "", "[" + resourceType + "." + resourceName + ".cidr_blocks] '['0.0.0.0/0']' should have been one of '['abc', 'xyz']'.", fileName, moduleName) )
+        expectedErrors = []
+        # run test
+        v.resources('aws_security_group_rule').with_property('type', 'ingress').property('cidr_blocks').list_should_contain_any(['abc', 'xyz'])
         # asserts
         assertFailuresAndErrors(self, v, expectedFailures, expectedErrors)
 
@@ -345,7 +383,7 @@ class TestValidator(unittest.TestCase):
         v = getValidator(resources)
         # set up expected outputs
         expectedFailures = []
-        expectedFailures.append( getMsg("high", "[" + resourceType + "." + resourceName + ".cidr_blocks] '['0.0.0.0/0']' should contain '['xyz']'.", fileName, moduleName) )
+        expectedFailures.append( getMsg("high", "", "[" + resourceType + "." + resourceName + ".cidr_blocks] '['0.0.0.0/0']' should contain '['xyz']'.", fileName, moduleName) )
         expectedErrors = []
         # run test
         v.resources('aws_security_group_rule').with_property('type', 'ingress').property('cidr_blocks').list_should_contain('xyz')
@@ -363,7 +401,7 @@ class TestValidator(unittest.TestCase):
         v = getValidator(resources)
         # set up expected outputs
         expectedFailures = []
-        expectedFailures.append( getMsg("high", "[" + resourceType + "." + resourceName + ".cidr_blocks] '['0.0.0.0/0']' should not contain '['0.0.0.0/0']'.", fileName, moduleName) )
+        expectedFailures.append( getMsg("high", "", "[" + resourceType + "." + resourceName + ".cidr_blocks] '['0.0.0.0/0']' should not contain '['0.0.0.0/0']'.", fileName, moduleName) )
         expectedErrors = []
         # run test
         v.resources(resourceType).with_property('type', 'ingress').property('cidr_blocks').list_should_not_contain('0.0.0.0/0')
@@ -382,7 +420,7 @@ class TestValidator(unittest.TestCase):
         v = getValidator(resources)
         # set up expected outputs
         expectedFailures = []
-        expectedFailures.append( getMsg("high", "[" + resourceType + "." + resourceName + "." + propertyName + "] should have property: 'server_side_encryption_configuration'", fileName, moduleName) )
+        expectedFailures.append( getMsg("high", "", "[" + resourceType + "." + resourceName + "." + propertyName + "] should have property: 'server_side_encryption_configuration'", fileName, moduleName) )
         expectedErrors = []
         # run test
         v.resources(resourceType).property(propertyName).should_have_properties('server_side_encryption_configuration')
@@ -401,7 +439,7 @@ class TestValidator(unittest.TestCase):
         v = getValidator(resources)
         # set up expected outputs
         expectedFailures = []
-        expectedFailures.append( getMsg("high", "[" + resourceType + "." + resourceName + "." + propertyName + "] should not have property: 'yadayadayada'", fileName, moduleName) )
+        expectedFailures.append( getMsg("high", "", "[" + resourceType + "." + resourceName + "." + propertyName + "] should not have property: 'yadayadayada'", fileName, moduleName) )
         expectedErrors = []
         # run test
         v.resources(resourceType).property(propertyName).should_not_have_properties('yadayadayada')
@@ -468,7 +506,7 @@ class TestValidator(unittest.TestCase):
         v = getValidator(resources)
         # set up expected outputs
         expectedFailures = []
-        expectedFailures.append( getMsg("high", "[" + resourceType + "." + resourceName + "." + propertyName2 + "." + propertyName3 + "] should match regex 'xyz'", fileName, moduleName) )
+        expectedFailures.append( getMsg("high", "", "[" + resourceType + "." + resourceName + "." + propertyName2 + "." + propertyName3 + "] should match regex 'xyz'", fileName, moduleName) )
         expectedErrors = []
         # run test
         v.resources(resourceType).property(propertyName2).property(propertyName3).should_match_regex(regex)
@@ -511,7 +549,7 @@ class TestValidator(unittest.TestCase):
         v = getValidator(resources)
         # set up expected outputs
         expectedFailures = []
-        expectedFailures.append( getMsg("high", "[" + resourceType + "." + resourceName + "." + propertyName2 + "." + propertyName3 + "] is not valid json", fileName, moduleName) )
+        expectedFailures.append( getMsg("high", "", "[" + resourceType + "." + resourceName + "." + propertyName2 + "." + propertyName3 + "] is not valid json", fileName, moduleName) )
         expectedErrors = []
         # run test
         v.resources(resourceType).property(propertyName2).property(propertyName3).should_contain_valid_json()
@@ -552,7 +590,7 @@ class TestValidator(unittest.TestCase):
         v.error_if_property_missing()
         # set up expected outputs
         expectedFailures = []
-        expectedFailures.append( getMsg("high", "[" + resourceType + "." + resourceName + "." + propertyName2 + "] should have property: 'xyz'", fileName, moduleName) )
+        expectedFailures.append( getMsg("high", "", "[" + resourceType + "." + resourceName + "." + propertyName2 + "] should have property: 'xyz'", fileName, moduleName) )
         expectedErrors = []
         # run test
         v.resources(resourceType).property(propertyName2).property('xyz').should_equal(True)
@@ -575,7 +613,7 @@ class TestValidator(unittest.TestCase):
         v.error_if_property_missing()
         # set up expected outputs
         expectedFailures = []
-        expectedFailures.append( getMsg("high", "[" + resourceType + "." + resourceName + "." + propertyName2 + "." + propertyName3 + "] should be 'True'. Is: 'False'", fileName, moduleName) )
+        expectedFailures.append( getMsg("high", "", "[" + resourceType + "." + resourceName + "." + propertyName2 + "." + propertyName3 + "] should be 'True'. Is: 'False'", fileName, moduleName) )
         expectedErrors = []
         # run test
         v.resources(resourceType).property(propertyName2).property(propertyName3).should_equal(True)
@@ -676,7 +714,7 @@ class TestValidator(unittest.TestCase):
         # asserts
         self.assertEqual(actual.resource_list, expected)
 
-    def test_resources_should_not_existt(self):
+    def test_resources_should_not_exist(self):
         # initialize
         resourceName = 'someName'
         resourceType = 'aws_iam_user_login_profile'
@@ -687,7 +725,7 @@ class TestValidator(unittest.TestCase):
         v = getValidator(resources)
         # set up expected outputs
         expectedFailures = []
-        expectedFailures.append( getMsg("high", "[" + resourceType + "] should not exist. Found in resource named " + resourceName, fileName, moduleName) )
+        expectedFailures.append( getMsg("high", "", "[" + resourceType + "] should not exist. Found in resource named " + resourceName, fileName, moduleName) )
         expectedErrors = []
         # run test
         v.resources(resourceType).should_not_exist()
@@ -705,7 +743,7 @@ class TestValidator(unittest.TestCase):
         v = getValidator(resources)
         # set up expected outputs
         expectedFailures = []
-        expectedFailures.append( getMsg("high", "[" + resourceType + "." + resourceName + "] should have property: 'server_side_encryption_configuration'", fileName, moduleName) )
+        expectedFailures.append( getMsg("high", "", "[" + resourceType + "." + resourceName + "] should have property: 'server_side_encryption_configuration'", fileName, moduleName) )
         expectedErrors = []
         # run test
         v.resources(resourceType).should_have_properties('server_side_encryption_configuration')
@@ -724,7 +762,7 @@ class TestValidator(unittest.TestCase):
         v = getValidator(resources)
         # set up expected outputs
         expectedFailures = []
-        expectedFailures.append( getMsg("high", "[" + resourceType + "." + resourceName + "] should not have property: '" + propertyName + "'", fileName, moduleName) )
+        expectedFailures.append( getMsg("high", "", "[" + resourceType + "." + resourceName + "] should not have property: '" + propertyName + "'", fileName, moduleName) )
         expectedErrors = []
         # run test
         v.resources(resourceType).should_not_have_properties(propertyName)
@@ -761,7 +799,7 @@ class TestValidator(unittest.TestCase):
         regex = 'xyz'
         # set up expected outputs
         expectedFailures = []
-        expectedFailures.append( getMsg("high", "[" + resourceType + "." + resourceName + "] name should match regex: 'xyz'", fileName, moduleName) )
+        expectedFailures.append( getMsg("high", "", "[" + resourceType + "." + resourceName + "] name should match regex: 'xyz'", fileName, moduleName) )
         expectedErrors = []
         # run test
         v.resources(resourceType).name_should_match_regex(regex)
@@ -1226,6 +1264,364 @@ class TestValidator(unittest.TestCase):
         # asserts
         self.assertFalse(actual)
 
+    def test_isResolved_str(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        var = "abc"
+        # run test
+        actual = p.isResolved(var)
+        # asserts
+        self.assertTrue(actual)
+
+    def test_isResolved_dict(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        var = {}
+        var['xyz'] = "abc"
+        # run test
+        actual = p.isResolved(var)
+        # asserts
+        self.assertTrue(actual)
+
+    def test_isResolved_dict_false(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        var = {}
+        var['xyz'] = "var@.abc"
+        # run test
+        actual = p.isResolved(var)
+        # asserts
+        self.assertFalse(actual)
+
+    def test_isResolved_list(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        var = ["abc"]
+        # run test
+        actual = p.isResolved(var)
+        # asserts
+        self.assertTrue(actual)
+
+    def test_isResolved_list_false(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        var = ["var@.abc"]
+        # run test
+        actual = p.isResolved(var)
+        # asserts
+        self.assertFalse(actual)
+
+    def test_isResolved_bool(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        var = False
+        # run test
+        actual = p.isResolved(var)
+        # asserts
+        self.assertFalse(actual)
+
+    def test_getOrigVar_var1(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        var = "var.abc"
+        # set up expected output
+        expectedOutput = var
+        # run test
+        actual = p.getOrigVar(var)
+        # asserts
+        self.assertEqual(expectedOutput, actual)
+
+    def test_getOrigVar_var2(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        var = "var@.abc"
+        # set up expected output
+        expectedOutput = "var.abc"
+        # run test
+        actual = p.getOrigVar(var)
+        # asserts
+        self.assertEqual(expectedOutput, actual)
+
+    def test_getOrigVar_var3(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        var = "var!.abc"
+        # set up expected output
+        expectedOutput = "var.abc"
+        # run test
+        actual = p.getOrigVar(var)
+        # asserts
+        self.assertEqual(expectedOutput, actual)
+
+    def test_getOrigVar_local1(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        var = "local.abc"
+        # set up expected output
+        expectedOutput = var
+        # run test
+        actual = p.getOrigVar(var)
+        # asserts
+        self.assertEqual(expectedOutput, actual)
+
+    def test_getOrigVar_local2(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        var = "local@.abc"
+        # set up expected output
+        expectedOutput = "local.abc"
+        # run test
+        actual = p.getOrigVar(var)
+        # asserts
+        self.assertEqual(expectedOutput, actual)
+
+    def test_getOrigVar_local3(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        var = "local!.abc"
+        # set up expected output
+        expectedOutput = "local.abc"
+        # run test
+        actual = p.getOrigVar(var)
+        # asserts
+        self.assertEqual(expectedOutput, actual)
+
+    def test_getOrigVar_module1(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        var = "module.abc"
+        # set up expected output
+        expectedOutput = var
+        # run test
+        actual = p.getOrigVar(var)
+        # asserts
+        self.assertEqual(expectedOutput, actual)
+
+    def test_getOrigVar_module2(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        var = "module@.abc"
+        # set up expected output
+        expectedOutput = "module.abc"
+        # run test
+        actual = p.getOrigVar(var)
+        # asserts
+        self.assertEqual(expectedOutput, actual)
+
+    def test_getOrigVar_module3(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        var = "module!.abc"
+        # set up expected output
+        expectedOutput = "module.abc"
+        # run test
+        actual = p.getOrigVar(var)
+        # asserts
+        self.assertEqual(expectedOutput, actual)
+
+    def test_containsVariable_str(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        value = "var.abc"
+        # run test
+        actual = p.containsVariable(value)
+        # asserts
+        self.assertTrue(actual)
+
+    def test_containsVariable_dict(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        value = {}
+        value['xyz'] = "var.abc"
+        # run test
+        actual = p.containsVariable(value)
+        # asserts
+        self.assertTrue(actual)
+
+    def test_containsVariable_dict_not_found(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        value = {}
+        value['xyz'] = "abc"
+        # run test
+        actual = p.containsVariable(value)
+        # asserts
+        self.assertFalse(actual)
+
+    def test_containsVariable_list(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        value = ["var.abc"]
+        # run test
+        actual = p.containsVariable(value)
+        # asserts
+        self.assertTrue(actual)
+
+    def test_containsVariable_list_not_found(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        value = ["abc"]
+        # run test
+        actual = p.containsVariable(value)
+        # asserts
+        self.assertFalse(actual)
+
+    def test_containsVariable_int(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        root = createHCLentry(p, None, "root")
+        modules = createHCLentry(p, root, "modules")
+        createHCLentry(p, modules, "common")
+        value = 1
+        # run test
+        actual = p.containsVariable(value)
+        # asserts
+        self.assertFalse(actual)
+
     def test_resolveVariablesInModule(self):
         # initialize
         jsonOutput = {
@@ -1339,6 +1735,337 @@ class TestValidator(unittest.TestCase):
         expected.append("yada")
         expected.append(expectedList)
         expected.append(aDict)
+        # run test
+        actual = p.resolveListVariable(value, moduleName)
+        # asserts
+        self.assertEqual(expected, actual)
+
+    def test_resolveListVariableMerge(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        varName = "varName"
+        newValue = "test-name"
+        dict1Key = "Name"
+        dict1Value = "${var." + varName + "}"
+        dict2Key = "Classifier"
+        dict2Value = "something"
+        dict3KeyValue = "someString"
+        value = []
+        dict1 = {}
+        dict1[dict1Key] = dict1Value
+        dict2 = {}
+        dict2[dict2Key] = dict2Value
+        value.append("merge")
+        value.append(dict1)
+        value.append(dict2)
+        value.append(dict3KeyValue)
+        moduleName = "inputModuleName"
+        p.modulesDict = {}
+        p.modulesDict[moduleName] = p.createModuleEntry(moduleName)
+        p.modulesDict[moduleName][p.VARIABLE][varName] = newValue
+        # set up expected output
+        expected = {}
+        expected[dict1Key] = newValue
+        expected[dict2Key] = dict2Value
+        expected[dict3KeyValue] = dict3KeyValue
+        # run test
+        actual = p.resolveListVariable(value, moduleName)
+        # asserts
+        self.assertEqual(expected, actual)
+
+    def test_resolveListVariableConcat(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        varName = "varName"
+        newValue = "test-name"
+        list1Value = "${var." + varName + "}"
+        list2Value1 = "something1"
+        list2Value2 = "something2"
+        list3Value = "someString"
+        value = []
+        list1 = []
+        list1.append(list1Value)
+        list2 = []
+        list2.append(list2Value1)
+        list2.append(list2Value2)
+        value.append("concat")
+        value.append(list1)
+        value.append(list2)
+        value.append(list3Value)
+        moduleName = "inputModuleName"
+        p.modulesDict = {}
+        p.modulesDict[moduleName] = p.createModuleEntry(moduleName)
+        p.modulesDict[moduleName][p.VARIABLE][varName] = newValue
+        # set up expected output
+        expected = []
+        expected.append(newValue)
+        expected.append(list2Value1)
+        expected.append(list2Value2)
+        expected.append(list3Value)
+        # run test
+        actual = p.resolveListVariable(value, moduleName)
+        # asserts
+        self.assertEqual(expected, actual)
+
+    def test_resolveListVariableElement(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        varName = "varName"
+        newValue = "test-name"
+        listValue0 = "Privileged"
+        listValue1 = "Trade-Secret"
+        listValue2 = "Confidential-PCI"
+        listValue3 = "Confidential-PHI"
+        listValue4 = "Confidential-SPI"
+        listValue5 = "Confidential-PII"
+        listValue6 = "Confidential-Other"
+        listValue7 = "Internal-Use-Only"
+        listValue8 = "Unclassified"
+        index = 7
+        value = []
+        list1 = []
+        list1.append(listValue0)
+        list1.append(listValue1)
+        list1.append(listValue2)
+        list1.append(listValue3)
+        list1.append(listValue4)
+        list1.append(listValue5)
+        list1.append(listValue6)
+        list1.append(listValue7)
+        list1.append(listValue8)
+        value.append("element")
+        value.append(list1)
+        value.append(7)
+        moduleName = "inputModuleName"
+        p.modulesDict = {}
+        p.modulesDict[moduleName] = p.createModuleEntry(moduleName)
+        p.modulesDict[moduleName][p.VARIABLE][varName] = newValue
+        # set up expected output
+        expected = list1[index]
+        # run test
+        actual = p.resolveListVariable(value, moduleName)
+        # asserts
+        self.assertEqual(expected, actual)
+
+    def test_resolveListVariableCoalesce1(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        varName1 = "varName1"
+        newValue1 = "a"
+        varName2 = "varName2"
+        newValue2 = "b"
+        value = []
+        value.append("coalesce")
+        value.append("${var." + varName1 + "}")
+        value.append("${var." + varName2 + "}")
+        moduleName = "inputModuleName"
+        p.modulesDict = {}
+        p.modulesDict[moduleName] = p.createModuleEntry(moduleName)
+        p.modulesDict[moduleName][p.VARIABLE][varName1] = newValue1
+        p.modulesDict[moduleName][p.VARIABLE][varName2] = newValue2
+        # set up expected output
+        expected = newValue1
+        # run test
+        actual = p.resolveListVariable(value, moduleName)
+        # asserts
+        self.assertEqual(expected, actual)
+
+    def test_resolveListVariableCoalesce2(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        varName1 = "varName1"
+        newValue1 = ""
+        varName2 = "varName2"
+        newValue2 = "b"
+        value = []
+        value.append("coalesce")
+        value.append("${var." + varName1 + "}")
+        value.append("${var." + varName2 + "}")
+        moduleName = "inputModuleName"
+        p.modulesDict = {}
+        p.modulesDict[moduleName] = p.createModuleEntry(moduleName)
+        p.modulesDict[moduleName][p.VARIABLE][varName1] = newValue1
+        p.modulesDict[moduleName][p.VARIABLE][varName2] = newValue2
+        # set up expected output
+        expected = newValue2
+        # run test
+        actual = p.resolveListVariable(value, moduleName)
+        # asserts
+        self.assertEqual(expected, actual)
+
+    def test_resolveListVariableCoalesce3(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        varName1 = "varName1"
+        newValue1 = 1
+        varName2 = "varName2"
+        newValue2 = 2
+        value = []
+        value.append("coalesce")
+        value.append("${var." + varName1 + "}")
+        value.append("${var." + varName2 + "}")
+        moduleName = "inputModuleName"
+        p.modulesDict = {}
+        p.modulesDict[moduleName] = p.createModuleEntry(moduleName)
+        p.modulesDict[moduleName][p.VARIABLE][varName1] = newValue1
+        p.modulesDict[moduleName][p.VARIABLE][varName2] = newValue2
+        # set up expected output
+        expected = newValue1
+        # run test
+        actual = p.resolveListVariable(value, moduleName)
+        # asserts
+        self.assertEqual(expected, actual)
+
+    def test_resolveListVariableCoalesce4(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        varName2 = "varName2"
+        newValue2 = 2
+        list1 = []
+        list1.append("")
+        list1.append("${var." + varName2 + "}")
+        value = []
+        value.append("coalesce")
+        value.append(list1)
+        value.append("...")
+        moduleName = "inputModuleName"
+        p.modulesDict = {}
+        p.modulesDict[moduleName] = p.createModuleEntry(moduleName)
+        p.modulesDict[moduleName][p.VARIABLE][varName2] = newValue2
+        # set up expected output
+        expected = newValue2
+        # run test
+        actual = p.resolveListVariable(value, moduleName)
+        # asserts
+        self.assertEqual(expected, actual)
+
+    def test_resolveListVariableCoalescelist1(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        varName1 = "varName1"
+        newValue1 = 1
+        varName2 = "varName2"
+        newValue2 = 2
+        varName3 = "varName3"
+        newValue3 = 3
+        varName4 = "varName4"
+        newValue4 = 4
+        list1 = []
+        list2 = []
+        list1.append("${var." + varName1 + "}")
+        list1.append("${var." + varName2 + "}")
+        list2.append("${var." + varName3 + "}")
+        list2.append("${var." + varName4 + "}")
+        value = []
+        value.append("coalescelist")
+        value.append(list1)
+        value.append(list2)
+        moduleName = "inputModuleName"
+        p.modulesDict = {}
+        p.modulesDict[moduleName] = p.createModuleEntry(moduleName)
+        p.modulesDict[moduleName][p.VARIABLE][varName1] = newValue1
+        p.modulesDict[moduleName][p.VARIABLE][varName2] = newValue2
+        p.modulesDict[moduleName][p.VARIABLE][varName3] = newValue3
+        p.modulesDict[moduleName][p.VARIABLE][varName4] = newValue4
+        # set up expected output
+        expected = list1
+        # run test
+        actual = p.resolveListVariable(value, moduleName)
+        # asserts
+        self.assertEqual(expected, actual)
+
+    def test_resolveListVariableCoalescelist2(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        varName3 = "varName3"
+        newValue3 = 3
+        varName4 = "varName4"
+        newValue4 = 4
+        list1 = []
+        list2 = []
+        list2.append("${var." + varName3 + "}")
+        list2.append("${var." + varName4 + "}")
+        value = []
+        value.append("coalescelist")
+        value.append(list1)
+        value.append(list2)
+        moduleName = "inputModuleName"
+        p.modulesDict = {}
+        p.modulesDict[moduleName] = p.createModuleEntry(moduleName)
+        p.modulesDict[moduleName][p.VARIABLE][varName3] = newValue3
+        p.modulesDict[moduleName][p.VARIABLE][varName4] = newValue4
+        # set up expected output
+        expected = list2
+        # run test
+        actual = p.resolveListVariable(value, moduleName)
+        # asserts
+        self.assertEqual(expected, actual)
+
+    def test_resolveListVariableCoalescelist3(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        varName3 = "varName3"
+        newValue3 = 3
+        varName4 = "varName4"
+        newValue4 = 4
+        list1 = []
+        list2 = []
+        list2.append("${var." + varName3 + "}")
+        list2.append("${var." + varName4 + "}")
+        listOfLists = []
+        listOfLists.append(list1)
+        listOfLists.append(list2)
+        value = []
+        value.append("coalescelist")
+        value.append(listOfLists)
+        value.append("...")
+        moduleName = "inputModuleName"
+        p.modulesDict = {}
+        p.modulesDict[moduleName] = p.createModuleEntry(moduleName)
+        p.modulesDict[moduleName][p.VARIABLE][varName3] = newValue3
+        p.modulesDict[moduleName][p.VARIABLE][varName4] = newValue4
+        # set up expected output
+        expected = list2
         # run test
         actual = p.resolveListVariable(value, moduleName)
         # asserts
@@ -1552,7 +2279,7 @@ class TestValidator(unittest.TestCase):
         # asserts
         self.assertEqual(expected, actual, "resolved variable not as expected")
 
-    def test_resolveVariable_replacementIsDict(self):
+    def test_resolveVariable_replacementFromDict(self):
         # initialize
         jsonOutput = {
             "failures": [],
@@ -1569,6 +2296,72 @@ class TestValidator(unittest.TestCase):
         p.modulesDict = {}
         p.modulesDict[moduleName] = p.createModuleEntry(moduleName)
         p.modulesDict[moduleName][p.VARIABLE][varName] = varValue
+        # set up expected output
+        expected = (newValue, True)
+        # run test
+        actual = p.resolveVariable(value, moduleName, False)
+        # asserts
+        self.assertEqual(expected, actual, "resolved variable not as expected")
+
+    def test_resolveVariable_replacementIsDict(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        nestedVarName = "nestedVarName"
+        newValue = "newValue"
+        varValue = {}
+        varValue[nestedVarName] = newValue
+        varName = "varName"
+        value = "${var." + varName + "}"
+        moduleName = "inputModuleName"
+        p.modulesDict = {}
+        p.modulesDict[moduleName] = p.createModuleEntry(moduleName)
+        p.modulesDict[moduleName][p.VARIABLE][varName] = varValue
+        # set up expected output
+        expected = (varValue, True)
+        # run test
+        actual = p.resolveVariable(value, moduleName, False)
+        # asserts
+        self.assertEqual(expected, actual, "resolved variable not as expected")
+
+    def test_resolveVariable_replacementIsInt(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        newValue = 1
+        varName = "varName"
+        value = "${var." + varName + "}"
+        moduleName = "inputModuleName"
+        p.modulesDict = {}
+        p.modulesDict[moduleName] = p.createModuleEntry(moduleName)
+        p.modulesDict[moduleName][p.VARIABLE][varName] = newValue
+        # set up expected output
+        expected = (newValue, True)
+        # run test
+        actual = p.resolveVariable(value, moduleName, False)
+        # asserts
+        self.assertEqual(expected, actual, "resolved variable not as expected")
+
+    def test_resolveVariable_replacementIsList(self):
+        # initialize
+        jsonOutput = {
+            "failures": [],
+            "errors": []
+        }
+        p = terraform_validate.PreProcessor(jsonOutput)
+        newValue = ["abc"]
+        varName = "varName"
+        value = "${var." + varName + "}"
+        moduleName = "inputModuleName"
+        p.modulesDict = {}
+        p.modulesDict[moduleName] = p.createModuleEntry(moduleName)
+        p.modulesDict[moduleName][p.VARIABLE][varName] = newValue
         # set up expected output
         expected = (newValue, True)
         # run test
@@ -1919,12 +2712,13 @@ class TestValidator(unittest.TestCase):
         moduleName = "anotherModuleName"
         varName = "varName"
         var = 'module.' + moduleName + "." + varName
+        varValue = {}
         p.modulesDict = {}
         p.modulesDict[inputModuleName] = p.createModuleEntry(inputModuleName)
         p.modulesDict[moduleName] = p.createModuleEntry(moduleName)
-        p.modulesDict[moduleName][p.OUTPUT][varName] = {}
+        p.modulesDict[moduleName][p.OUTPUT][varName] = varValue
         # set up expected output
-        expected = var, moduleName, True
+        expected = varValue, moduleName, True
         # run test
         actual = p.getReplacementValue(var, inputModuleName, True)
         # asserts
@@ -2005,29 +2799,71 @@ class TestValidator(unittest.TestCase):
         moduleName1 = "a module name"
         fileName1 = "the file name"
         severity1 = "high"
+        isRuleOverridden1 = False
+        resourceName1 = ""
+        overrides1 = []
         failure2 = "another failure"
         moduleName2 = "some other module name"
         fileName2 = "another file name"
         severity2 = "low"
+        isRuleOverridden2 = False
+        resourceName2 = "aResourceName"
+        overrides2 = []
+        severity3 = "high"
+        isRuleOverridden3 = True
+        waived3 = "RAR-1234"
+        resourceName3 = "anotherResourceName"
+        overrides3 = []
+        overrides3.append(["ruleName", resourceName3, waived3])
+        severity4 = "high"
+        isRuleOverridden4 = True
+        resourceName4 = "no match"
+        overrides4 = []
+        overrides4.append(["ruleName", resourceName4])
+        severity5 = "low"
+        isRuleOverridden5 = True
+        resourceName5 = "yetAnotherResourceName"
+        overrides5 = []
+        overrides5.append(["ruleName", resourceName5])
         # set up expected outputs
         expected = []
         expectedFailure1 = {}
         expectedFailure1["severity"] = severity1
+        expectedFailure1["waived"] = ""
         expectedFailure1["message"] = failure1
         expectedFailure1["moduleName"] = moduleName1
         expectedFailure1["fileName"] = fileName1
         expectedFailure2 = {}
         expectedFailure2["severity"] = severity2
+        expectedFailure2["waived"] = ""
         expectedFailure2["message"] = failure2
         expectedFailure2["moduleName"] = moduleName2
         expectedFailure2["fileName"] = fileName2
+        expectedFailure3 = {}
+        expectedFailure3["severity"] = severity3
+        expectedFailure3["waived"] = "**waived by " + waived3 + "**"
+        expectedFailure3["message"] = failure2
+        expectedFailure3["moduleName"] = moduleName2
+        expectedFailure3["fileName"] = fileName2
+        expectedFailure4 = {}
+        expectedFailure4["severity"] = severity5
+        expectedFailure4["waived"] = "**waived**"
+        expectedFailure4["message"] = failure2
+        expectedFailure4["moduleName"] = moduleName2
+        expectedFailure4["fileName"] = fileName2
         expected.append(expectedFailure1)
         expected.append(expectedFailure2)
+        expected.append(expectedFailure3)
+        expected.append(expectedFailure4)
         # run test
-        p.add_failure(failure1, moduleName1, fileName1, severity1)
-        p.add_failure(failure2, moduleName2, fileName2, severity2)
+        p.add_failure(failure1, moduleName1, fileName1, severity1, isRuleOverridden1, overrides1, resourceName1)
+        p.add_failure(failure2, moduleName2, fileName2, severity2, isRuleOverridden2, overrides2, resourceName2)
+        p.add_failure(failure2, moduleName2, fileName2, severity3, isRuleOverridden3, overrides3, resourceName3)
+        with self.assertRaises(SystemExit):
+            p.add_failure(failure2, moduleName2, fileName2, severity4, isRuleOverridden4, overrides4, resourceName4)
+        p.add_failure(failure2, moduleName2, fileName2, severity5, isRuleOverridden5, overrides5, resourceName5)
         # asserts
-        self.assertEqual(2, len(p.jsonOutput["failures"]), "should have been 12 failures")
+        self.assertEqual(4, len(p.jsonOutput["failures"]), "should have been 4 failures")
         self.assertEqual(expected, p.jsonOutput["failures"], "failure message isn't as expected")
 
     def test_add_error_notAdded_pass1(self):
@@ -2082,6 +2918,7 @@ class TestValidator(unittest.TestCase):
         # set up expected outputs
         expected = {}
         expected["severity"] = severity
+        expected["waived"] = ""
         expected["message"] = error
         expected["moduleName"] = moduleName
         expected["fileName"] = fileName
@@ -2099,17 +2936,19 @@ class TestValidator(unittest.TestCase):
         }
         p = terraform_validate.PreProcessor(jsonOutput)
         severity = "high"
+        waived = "**waived**"
         msg = "some message"
         moduleName = "a module name"
         fileName = "the file name"
         # set up expected outputs
         expected = {}
         expected["severity"] = severity
+        expected["waived"] = waived
         expected["message"] = msg
         expected["moduleName"] = moduleName
         expected["fileName"] = fileName
         # run test
-        actual = p.getFailureMsg(severity, msg, moduleName, fileName)
+        actual = p.getFailureMsg(severity, waived, msg, moduleName, fileName)
         # asserts
         self.assertEqual(expected, actual, "failure message isn't as expected")
 

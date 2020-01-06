@@ -12,6 +12,10 @@ By parsing a directory of .tf files using `pyhcl`, each defined resource can be 
 
 ### Meant to be used with my fork of terrascan (terrascan-sf until pull request accepted)
 
+* The original open source version of terraform_validate didn't completely do the job needed but it was a good start.
+* The problem with it was it didn't resolve modules and replace variables so the rules were running on the variable names instead of the variable values.  This was fine for hard-coded values but didn't work for variables.
+* About 2/3 of the code in terraform_validate is now handling the resolving of modules and variable replacement.  It is a complex issue akin to writing a compiler.
+
 ### Modules are resolved and variables are replaced
 
 * if variables are defined outside the scope of the Terraform files, like in AWS, they are not replaced

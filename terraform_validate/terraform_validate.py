@@ -1,11 +1,10 @@
 import hcl
 import os
-import codecs
 import re
 import traceback
 import json
 import logging
-
+import sys
 
 class TerraformPropertyList:
 
@@ -18,27 +17,33 @@ class TerraformPropertyList:
 
     def property(self, property_name):
         propList = TerraformPropertyList(self.validator)
-        for property in self.properties:
+        for prop in self.properties:
             pvList = []
-            if type(property.property_value) is list:
-                pvList = property.property_value
+            if type(prop.property_value) is list:
+                pvList = prop.property_value
             else:
-                pvList.append(property.property_value)
+                pvList.append(prop.property_value)
 
+            wasFound = False
             for pv in pvList:
-                if property_name in pv.keys():
-                    propList.properties.append(TerraformProperty(property.resource_type,
-                                               "{0}.{1}".format(property.resource_name, property.property_name),
+                if type(pv) is dict and property_name in pv.keys():
+                    wasFound = True
+                    propList.properties.append(TerraformProperty(prop.resource_type,
+                                               "{0}.{1}".format(prop.resource_name, prop.property_name),
                                                property_name,
                                                pv[property_name],
-                                               property.moduleName,
-                                               property.fileName))
-                elif self.validator.raise_error_if_property_missing:
-                    self.validator.preprocessor.add_failure(
-                        "[{0}.{1}] should have property: '{2}'".format(property.resource_type, "{0}.{1}".format(property.resource_name, property.property_name), property_name),
-                        property.moduleName,
-                        property.fileName,
-                        self.validator.severity)
+                                               prop.moduleName,
+                                               prop.fileName))
+                    
+            if not wasFound and self.validator.raise_error_if_property_missing:                    
+                self.validator.preprocessor.add_failure(
+                    "[{0}.{1}] should have property: '{2}'".format(prop.resource_type, "{0}.{1}".format(prop.resource_name, prop.property_name), property_name),
+                    prop.moduleName,
+                    prop.fileName,
+                    self.validator.severity,
+                    self.validator.isRuleOverridden,
+                    self.validator.overrides,
+                    prop.resource_name)
 
         return propList
 
@@ -46,175 +51,224 @@ class TerraformPropertyList:
         self.should_equal(expected_value, True)
 
     def should_equal(self, expected_value, caseInsensitive=False):
-        for property in self.properties:
+        for prop in self.properties:
 
             expected_value = self.int2str(expected_value)
-            property.property_value = self.int2str(property.property_value)
+            prop.property_value = self.int2str(prop.property_value)
             expected_value = self.bool2str(expected_value)
-            property.property_value = self.bool2str(property.property_value)
+            prop.property_value = self.bool2str(prop.property_value)
 
             if caseInsensitive:
                 # make both actual and expected lower case so case won't matter
-                pv = property.property_value.lower()
+                pv = prop.property_value.lower()
                 ev = expected_value.lower()
             else:
-                pv = property.property_value
+                pv = prop.property_value
                 ev = expected_value
 
             if pv != ev:
-                self.validator.preprocessor.add_failure("[{0}.{1}.{2}] should be '{3}'. Is: '{4}'".format(property.resource_type,
-                                                                                                          property.resource_name,
-                                                                                                          property.property_name,
+                self.validator.preprocessor.add_failure("[{0}.{1}.{2}] should be '{3}'. Is: '{4}'".format(prop.resource_type,
+                                                                                                          prop.resource_name,
+                                                                                                          prop.property_name,
                                                                                                           expected_value,
-                                                                                                          property.property_value),
-                                                        property.moduleName,
-                                                        property.fileName,
-                                                        self.validator.severity)
+                                                                                                          prop.property_value),
+                                                        prop.moduleName,
+                                                        prop.fileName,
+                                                        self.validator.severity,
+                                                        self.validator.isRuleOverridden,
+                                                        self.validator.overrides,
+                                                        prop.resource_name)
 
     def should_not_equal_case_insensitive(self, expected_value):
         self.should_not_equal(expected_value, True)
 
     def should_not_equal(self, expected_value, caseInsensitive=False):
-        for property in self.properties:
+        for prop in self.properties:
 
-            property.property_value = self.int2str(property.property_value)
+            prop.property_value = self.int2str(prop.property_value)
             expected_value = self.int2str(expected_value)
             expected_value = self.bool2str(expected_value)
-            property.property_value = self.bool2str(property.property_value)
+            prop.property_value = self.bool2str(prop.property_value)
 
             if caseInsensitive:
                 # make both actual and expected lower case so case won't matter
-                pv = property.property_value.lower()
+                pv = prop.property_value.lower()
                 ev = expected_value.lower()
             else:
-                pv = property.property_value
+                pv = prop.property_value
                 ev = expected_value
 
             if pv == ev:
-                self.validator.preprocessor.add_failure("[{0}.{1}.{2}] should not be '{3}'. Is: '{4}'".format(property.resource_type,
-                                                                                                              property.resource_name,
-                                                                                                              property.property_name,
+                self.validator.preprocessor.add_failure("[{0}.{1}.{2}] should not be '{3}'. Is: '{4}'".format(prop.resource_type,
+                                                                                                              prop.resource_name,
+                                                                                                              prop.property_name,
                                                                                                               expected_value,
-                                                                                                              property.property_value),
-                                                        property.moduleName,
-                                                        property.fileName,
-                                                        self.validator.severity)
+                                                                                                              prop.property_value),
+                                                        prop.moduleName,
+                                                        prop.fileName,
+                                                        self.validator.severity,
+                                                        self.validator.isRuleOverridden,
+                                                        self.validator.overrides,
+                                                        prop.resource_name)
+
+    def list_should_contain_any(self, values_list):
+        if type(values_list) is not list:
+            values_list = [values_list]
+
+        for prop in self.properties:
+            property_value = prop.property_value
+            if type(property_value) is not list:
+                property_value = [property_value]
+            for pv in property_value:
+                if pv not in values_list:
+                    if type(prop.property_value) is list:
+                        prop.property_value = [str(x) for x in prop.property_value]  # fix 2.6/7
+                    self.validator.preprocessor.add_failure("[{0}.{1}.{2}] '{3}' should have been one of '{4}'.".format(prop.resource_type,
+                                                                                                                        prop.resource_name,
+                                                                                                                        prop.property_name,
+                                                                                                                        prop.property_value,
+                                                                                                                        values_list),
+                                                            prop.moduleName,
+                                                            prop.fileName,
+                                                            self.validator.severity,
+                                                            self.validator.isRuleOverridden,
+                                                            self.validator.overrides,
+                                                            prop.resource_name)
+                    break;
 
     def list_should_contain(self, values_list):
         if type(values_list) is not list:
             values_list = [values_list]
 
-        for property in self.properties:
+        for prop in self.properties:
 
             values_missing = []
             for value in values_list:
-                if value not in property.property_value:
+                if value not in prop.property_value:
                     values_missing.append(value)
 
             if len(values_missing) != 0:
-                if type(property.property_value) is list:
-                    property.property_value = [str(x) for x in property.property_value]  # fix 2.6/7
-                self.validator.preprocessor.add_failure("[{0}.{1}.{2}] '{3}' should contain '{4}'.".format(property.resource_type,
-                                                                                                           property.resource_name,
-                                                                                                           property.property_name,
-                                                                                                           property.property_value,
+                if type(prop.property_value) is list:
+                    prop.property_value = [str(x) for x in prop.property_value]  # fix 2.6/7
+                self.validator.preprocessor.add_failure("[{0}.{1}.{2}] '{3}' should contain '{4}'.".format(prop.resource_type,
+                                                                                                           prop.resource_name,
+                                                                                                           prop.property_name,
+                                                                                                           prop.property_value,
                                                                                                            values_missing),
-                                                        property.moduleName,
-                                                        property.fileName,
-                                                        self.validator.severity)
+                                                        prop.moduleName,
+                                                        prop.fileName,
+                                                        self.validator.severity,
+                                                        self.validator.isRuleOverridden,
+                                                        self.validator.overrides,
+                                                        prop.resource_name)
 
     def list_should_not_contain(self, values_list):
         if type(values_list) is not list:
             values_list = [values_list]
 
-        for property in self.properties:
+        for prop in self.properties:
 
             values_missing = []
             for value in values_list:
-                if value in property.property_value:
+                if value in prop.property_value:
                     values_missing.append(value)
 
             if len(values_missing) != 0:
-                if type(property.property_value) is list:
-                    property.property_value = [str(x) for x in property.property_value]  # fix 2.6/7
-                self.validator.preprocessor.add_failure("[{0}.{1}.{2}] '{3}' should not contain '{4}'.".format(property.resource_type,
-                                                                                                               property.resource_name,
-                                                                                                               property.property_name,
-                                                                                                               property.property_value,
+                if type(prop.property_value) is list:
+                    prop.property_value = [str(x) for x in prop.property_value]  # fix 2.6/7
+                self.validator.preprocessor.add_failure("[{0}.{1}.{2}] '{3}' should not contain '{4}'.".format(prop.resource_type,
+                                                                                                               prop.resource_name,
+                                                                                                               prop.property_name,
+                                                                                                               prop.property_value,
                                                                                                                values_missing),
-                                                        property.moduleName,
-                                                        property.fileName,
-                                                        self.validator.severity)
+                                                        prop.moduleName,
+                                                        prop.fileName,
+                                                        self.validator.severity,
+                                                        self.validator.isRuleOverridden,
+                                                        self.validator.overrides,
+                                                        prop.resource_name)
 
     def should_have_properties(self, properties_list):
         if type(properties_list) is not list:
             properties_list = [properties_list]
 
-        for property in self.properties:
-            property_names = property.property_value.keys()
+        for prop in self.properties:
+            property_names = prop.property_value.keys()
             for required_property_name in properties_list:
                 if required_property_name not in property_names:
-                    self.validator.preprocessor.add_failure("[{0}.{1}.{2}] should have property: '{3}'".format(property.resource_type,
-                                                                                                               property.resource_name,
-                                                                                                               property.property_name,
+                    self.validator.preprocessor.add_failure("[{0}.{1}.{2}] should have property: '{3}'".format(prop.resource_type,
+                                                                                                               prop.resource_name,
+                                                                                                               prop.property_name,
                                                                                                                required_property_name),
-                                                            property.moduleName,
-                                                            property.fileName,
-                                                            self.validator.severity)
+                                                            prop.moduleName,
+                                                            prop.fileName,
+                                                            self.validator.severity,
+                                                            self.validator.isRuleOverridden,
+                                                            self.validator.overrides,
+                                                            prop.resource_name)
 
     def should_not_have_properties(self, properties_list):
         if type(properties_list) is not list:
             properties_list = [properties_list]
 
-        for property in self.properties:
-            property_names = property.property_value.keys()
+        for prop in self.properties:
+            property_names = prop.property_value.keys()
             for excluded_property_name in properties_list:
                 if excluded_property_name in property_names:
-                    self.validator.preprocessor.add_failure("[{0}.{1}.{2}] should not have property: '{3}'".format(property.resource_type,
-                                                                                                                   property.resource_name,
-                                                                                                                   property.property_name,
+                    self.validator.preprocessor.add_failure("[{0}.{1}.{2}] should not have property: '{3}'".format(prop.resource_type,
+                                                                                                                   prop.resource_name,
+                                                                                                                   prop.property_name,
                                                                                                                    excluded_property_name),
-                                                            property.moduleName,
-                                                            property.fileName,
-                                                            self.validator.severity)
+                                                            prop.moduleName,
+                                                            prop.fileName,
+                                                            self.validator.severity,
+                                                            self.validator.isRuleOverridden,
+                                                            self.validator.overrides,
+                                                            prop.resource_name)
 
     def find_property(self, regex):
-        list = TerraformPropertyList(self.validator)
-        for property in self.properties:
-            for nested_property in property.property_value:
+        lst = TerraformPropertyList(self.validator)
+        for prop in self.properties:
+            for nested_property in prop.property_value:
                 if self.validator.matches_regex_pattern(nested_property, regex):
-                    list.properties.append(TerraformProperty(property.resource_type,
-                                           "{0}.{1}".format(property.resource_name, property.property_name),
+                    lst.properties.append(TerraformProperty(prop.resource_type,
+                                           "{0}.{1}".format(prop.resource_name, prop.property_name),
                                            nested_property,
-                                           property.property_value[nested_property],
-                                           property.moduleName,
-                                           property.fileName))
-        return list
+                                           prop.property_value[nested_property],
+                                           prop.moduleName,
+                                           prop.fileName))
+        return lst
 
     def should_match_regex(self, regex):
-        for property in self.properties:
-            if not self.validator.matches_regex_pattern(property.property_value, regex):
-                self.validator.preprocessor.add_failure("[{0}.{1}] should match regex '{2}'".format(property.resource_type, "{0}.{1}".format(property.resource_name, property.property_name), regex),
-                                                        property.moduleName,
-                                                        property.fileName,
-                                                        self.validator.severity)
+        for prop in self.properties:
+            if not self.validator.matches_regex_pattern(prop.property_value, regex):
+                self.validator.preprocessor.add_failure("[{0}.{1}] should match regex '{2}'".format(prop.resource_type, "{0}.{1}".format(prop.resource_name, prop.property_name), regex),
+                                                        prop.moduleName,
+                                                        prop.fileName,
+                                                        self.validator.severity,
+                                                        self.validator.isRuleOverridden,
+                                                        self.validator.overrides,
+                                                        prop.resource_name)
 
     def should_contain_valid_json(self):
-        for property in self.properties:
+        for prop in self.properties:
             try:
-                json.loads(property.property_value)
+                json.loads(prop.property_value)
             except:
-                self.validator.preprocessor.add_failure("[{0}.{1}.{2}] is not valid json".format(property.resource_type, property.resource_name, property.property_name),
-                                                        property.moduleName,
-                                                        property.fileName,
-                                                        self.validator.severity)
+                self.validator.preprocessor.add_failure("[{0}.{1}.{2}] is not valid json".format(prop.resource_type, prop.resource_name, prop.property_name),
+                                                        prop.moduleName,
+                                                        prop.fileName,
+                                                        self.validator.severity,
+                                                        self.validator.isRuleOverridden,
+                                                        self.validator.overrides,
+                                                        prop.resource_name)
 
-    def bool2str(self, bool):
-        if str(bool).lower() in ["true"]:
+    def bool2str(self, b):
+        if str(b).lower() in ["true"]:
             return "True"
-        if str(bool).lower() in ["false"]:
+        if str(b).lower() in ["false"]:
             return "False"
-        return bool
+        return b
 
     def int2str(self, property_value):
         if type(property_value) is int:
@@ -235,8 +289,8 @@ class TerraformProperty:
 
 class TerraformResource:
 
-    def __init__(self, type, name, config, fileName, moduleName):
-        self.type = type
+    def __init__(self, typ, name, config, fileName, moduleName):
+        self.type = typ
         self.name = name
         self.config = config
         self.fileName = fileName
@@ -274,49 +328,59 @@ class TerraformResourceList:
         self.resource_types = resourceTypes
 
     def property(self, property_name):
-        list = TerraformPropertyList(self.validator)
+        lst = TerraformPropertyList(self.validator)
         if len(self.resource_list) > 0:
             for resource in self.resource_list:
                 if property_name in resource.config.keys():
-                    list.properties.append(TerraformProperty(resource.type, resource.name, property_name, resource.config[property_name], resource.moduleName, resource.fileName))
+                    lst.properties.append(TerraformProperty(resource.type, resource.name, property_name, resource.config[property_name], resource.moduleName, resource.fileName))
                 elif self.validator.raise_error_if_property_missing:
                     self.validator.preprocessor.add_failure("[{0}.{1}] should have property: '{2}'".format(resource.type, resource.name, property_name),
-                                                            resource.moduleName, resource.fileName, self.validator.severity)
+                                                            resource.moduleName,
+                                                            resource.fileName,
+                                                            self.validator.severity,
+                                                            self.validator.isRuleOverridden,
+                                                            self.validator.overrides,
+                                                            resource.name)
 
-        return list
+        return lst
 
     def find_property(self, regex):
-        list = TerraformPropertyList(self.validator)
+        lst = TerraformPropertyList(self.validator)
         if len(self.resource_list) > 0:
             for resource in self.resource_list:
-                for property in resource.config:
-                    if self.validator.matches_regex_pattern(property, regex):
-                        list.properties.append(TerraformProperty(resource.type,
-                                                                 resource.name,
-                                                                 property,
-                                                                 resource.config[property],
-                                                                 resource.moduleName,
-                                                                 resource.fileName))
-        return list
+                for prop in resource.config:
+                    if self.validator.matches_regex_pattern(prop, regex):
+                        lst.properties.append(TerraformProperty(resource.type,
+                                                                resource.name,
+                                                                prop,
+                                                                resource.config[prop],
+                                                                resource.moduleName,
+                                                                resource.fileName))
+        return lst
 
     def with_property(self, property_name, regex):
-        list = TerraformResourceList(self.validator, None, self.resource_types, {})
+        lst = TerraformResourceList(self.validator, None, self.resource_types, {})
 
         if len(self.resource_list) > 0:
             for resource in self.resource_list:
-                for property in resource.config:
-                    if property == property_name:
+                for prop in resource.config:
+                    if prop == property_name:
                         tf_property = TerraformProperty(resource.type, resource.name, property_name, resource.config[property_name], resource.moduleName, resource.fileName)
                         if self.validator.matches_regex_pattern(tf_property.property_value, regex):
-                            list.resource_list.append(resource)
+                            lst.resource_list.append(resource)
 
-        return list
+        return lst
 
     def should_not_exist(self):
         for terraformResource in self.resource_list:
             if terraformResource.type == self.requestedResourceType:
                 self.validator.preprocessor.add_failure("[{0}] should not exist. Found in resource named {1}".format(self.requestedResourceType, terraformResource.name),
-                                                        terraformResource.moduleName, terraformResource.fileName, self.validator.severity)
+                                                        terraformResource.moduleName,
+                                                        terraformResource.fileName,
+                                                        self.validator.severity,
+                                                        self.validator.isRuleOverridden,
+                                                        self.validator.overrides,
+                                                        terraformResource.name)
 
     def should_have_properties(self, properties_list):
         if type(properties_list) is not list:
@@ -327,9 +391,13 @@ class TerraformResourceList:
                 property_names = resource.config.keys()
                 for required_property_name in properties_list:
                     if required_property_name not in property_names:
-                        self.validator.preprocessor.add_failure("[{0}.{1}] should have property: '{2}'".format(
-                            resource.type, resource.name, required_property_name),
-                            resource.moduleName, resource.fileName, self.validator.severity)
+                        self.validator.preprocessor.add_failure("[{0}.{1}] should have property: '{2}'".format(resource.type, resource.name, required_property_name),
+                                                                resource.moduleName,
+                                                                resource.fileName,
+                                                                self.validator.severity,
+                                                                self.validator.isRuleOverridden,
+                                                                self.validator.overrides,
+                                                                resource.name)
 
     def should_not_have_properties(self, properties_list):
         if type(properties_list) is not list:
@@ -341,13 +409,23 @@ class TerraformResourceList:
                 for excluded_property_name in properties_list:
                     if excluded_property_name in property_names:
                         self.validator.preprocessor.add_failure("[{0}.{1}] should not have property: '{2}'".format(resource.type, resource.name, excluded_property_name),
-                                                                resource.moduleName, resource.fileName, self.validator.severity)
+                                                                resource.moduleName,
+                                                                resource.fileName,
+                                                                self.validator.severity,
+                                                                self.validator.isRuleOverridden,
+                                                                self.validator.overrides,
+                                                                resource.name)
 
     def name_should_match_regex(self, regex):
         for resource in self.resource_list:
             if not self.validator.matches_regex_pattern(resource.name, regex):
                 self.validator.preprocessor.add_failure("[{0}.{1}] name should match regex: '{2}'".format(resource.type, resource.name, regex),
-                                                        resource.moduleName, resource.fileName, self.validator.severity)
+                                                        resource.moduleName,
+                                                        resource.fileName,
+                                                        self.validator.severity,
+                                                        self.validator.isRuleOverridden,
+                                                        self.validator.overrides,
+                                                        resource.name)
 
 
 class Validator:
@@ -359,16 +437,17 @@ class Validator:
     def __init__(self):
         self.raise_error_if_property_missing = False
 
-    def resources(self, type):
+    def resources(self, typ):
         resources = self.terraform.get('resource', {})
 
-        return TerraformResourceList(self, type, None, resources)
+        return TerraformResourceList(self, typ, None, resources)
 
     def error_if_property_missing(self):
         self.raise_error_if_property_missing = True
 
     # generator that loops through all files to be scanned (stored internally in fileName; returns self (Validator) but sets self.fileName and self.terraform
-    def get_terraform_files(self):
+    def get_terraform_files(self, isRuleOverridden):
+        self.isRuleOverridden = isRuleOverridden
         for self.fileName, self.terraform in self.preprocessor.modulesDict.items():
             yield self
 
@@ -409,7 +488,7 @@ class PreProcessor:
     MODULE = "module"
     SOURCE = "source"
     DEFAULT = "default"
-    REGEX_COLON_BRACKET = re.compile('.*:\s*\[.*', re.DOTALL)   # any characters : whitespace [ any characters
+    REGEX_COLON_BRACKET = re.compile('.*:\s*\[.*', re.DOTALL)           # any characters : whitespace [ any characters
 
     def __init__(self, jsonOutput):
         self.jsonOutput = jsonOutput
@@ -426,15 +505,20 @@ class PreProcessor:
         self.locals = ["local.", "local@.", "local!."]
         self.modules = ["module.", "module@.", "module!."]
         self.terraform_workspaces = ["terraform.workspace", "terraform@.workspace", "terraform!.workspace"]
-        self.variableFind = [self.braces[0], self.vars[0], self.locals[0], self.modules[0], self.terraform_workspaces[0]]
-        self.variableErrorReplacement = [self.braces[1], self.vars[1], self.locals[1], self.modules[1], self.terraform_workspaces[1]]
-        self.variableErrorReplacementPass2 = [self.braces[2], self.vars[2], self.locals[2], self.modules[2], self.terraform_workspaces[2]]
-
+        self.datas = ["data.", "data@.", "data!."]
+        self.variableFind = [self.braces[0], self.vars[0], self.locals[0], self.modules[0], self.terraform_workspaces[0], self.datas[0]]
+        self.variableErrorReplacement = [self.braces[1], self.vars[1], self.locals[1], self.modules[1], self.terraform_workspaces[1], self.datas[1]]
+        self.variableErrorReplacementPass2 = [self.braces[2], self.vars[2], self.locals[2], self.modules[2], self.terraform_workspaces[2], self.datas[2]]
+        self.replacements = [self.variableFind, self.variableErrorReplacement, self.variableErrorReplacementPass2]
+        self.replaceableVariablePrefixes = [self.braces[0], self.vars[0], self.locals[0], self.modules[0], self.terraform_workspaces[0],
+                                            self.braces[1], self.vars[1], self.locals[1], self.modules[1], self.terraform_workspaces[1],
+                                            self.braces[2], self.vars[2], self.locals[2], self.modules[2], self.terraform_workspaces[2]]
+        
     def process(self, path, variablesJsonFilename=None):
         inputVars = {}
         if variablesJsonFilename is not None:
-            for fileName in variablesJsonFilename:                
-                with codecs.open(fileName, 'r', encoding='utf8') as fp:
+            for fileName in variablesJsonFilename:
+                with open(fileName, "r", encoding="utf-8") as fp:
                     try:
                         variables_string = fp.read()
                         inputVarsDict = hcl.loads(variables_string)
@@ -459,8 +543,8 @@ class PreProcessor:
         # make second pass so variables depending on a previous definition should now be defined
         logging.warning("------------------>>>starting pass 2...")
         self.passNumber = 2
-        self.variableFind = self.variableErrorReplacement
-        self.variableErrorReplacement = self.variableErrorReplacementPass2
+        self.variableFind += self.variableErrorReplacement
+        self.variableErrorReplacement = self.variableErrorReplacementPass2 + self.variableErrorReplacementPass2
         self.getAllModules(self.hclDict, False)
 
     def readDir(self, path, d):
@@ -482,7 +566,7 @@ class PreProcessor:
                     # terraform file (ends with .tf)
                     fileName = os.path.join(directory, file)
                     relativeFileName = fileName[len(path):]
-                    with codecs.open(fileName, 'r', encoding='utf8') as fp:
+                    with open(fileName, 'r', encoding='utf8') as fp:
                         try:
                             terraform_string = fp.read()
                             if len(terraform_string.strip()) > 0:
@@ -537,7 +621,8 @@ class PreProcessor:
                     for parameter in module:
                         if parameter == self.SOURCE:
                             sourcePath = module[parameter]
-                            self.createMissingFromSourcePath(sourcePath, parentDir, currentFileName)
+                            if not sourcePath.startswith("git::"):
+                                self.createMissingFromSourcePath(sourcePath, parentDir, currentFileName)
 
     def createMissingFromSourcePath(self, sourcePath, d, currentFileName):
         # source is local
@@ -730,11 +815,13 @@ class PreProcessor:
                         if self.passNumber == 1 or self.containsVariable(moduleDict[self.OUTPUT][output]):
                             moduleDict[self.OUTPUT][output] = value[output][self.VALUE]
                 elif key == self.RESOURCE:
-                    if self.passNumber == 1:
-                        for resourceType in value:
-                            resourceNames = value[resourceType]
-                            for resourceName in resourceNames:
-                                config = resourceNames[resourceName]
+                    for resourceType in value:
+                        resourceNames = value[resourceType]
+                        for resourceName in resourceNames:
+                            config = resourceNames[resourceName]
+                            res = moduleDict[self.RESOURCE].get(resourceName, None)
+                            # only replace on first pass or not already fully resolved
+                            if self.passNumber == 1 or (res != None and self.containsVariable(res.config)):
                                 moduleDict[self.RESOURCE][resourceName] = TerraformResource(resourceType, resourceName, config, d[self.FILE_NAME], moduleName)
                 elif key == self.VARIABLE:
                     '''
@@ -838,6 +925,8 @@ class PreProcessor:
             return self.resolveDictVariable(value, moduleName)
         elif type(value) is list:
             return self.resolveListVariable(value, moduleName)
+        elif type(value) is tuple:
+            return self.resolveTupleVariable(value, moduleName)
         else:
             return value
 
@@ -848,11 +937,98 @@ class PreProcessor:
         return returnValue
 
     def resolveListVariable(self, value, moduleName):
+        if len(value) == 0:
+            return value;
         index = 0
         for v in value:
             value[index] = self.resolveVariableByType(v, moduleName)
             index += 1
+        if value[0] in ("join", "merge", "concat", "coalesce", "element", "coalescelist"):
+            # supported function
+            return self.handleFunction(value)
         return value
+
+    def resolveTupleVariable(self, value, moduleName):
+        returnValue = tuple(self.resolveVariableByType(v, moduleName) for v in value)
+        if len(returnValue) == 3:
+            floatValue0 = self.getFloatValue(returnValue[0])
+            floatValue2 = self.getFloatValue(returnValue[2])
+            if type(floatValue0) == float and type(returnValue[1]) == str and type(floatValue2) == float:
+                if returnValue[1] == "+":
+                    return floatValue0 + floatValue2
+                elif returnValue[1] == "-":
+                    return floatValue0 - floatValue2
+                elif returnValue[1] == "*":
+                    return floatValue0 * floatValue2
+                elif returnValue[1] == "/":
+                    return floatValue0 / floatValue2
+        return returnValue
+            
+    def getFloatValue(self, value):
+        try:
+            return float(value)
+        except:
+            return value;
+
+    def handleFunction(self, value):
+        # check if all variables have been resolved
+        if self.containsVariable(value, True):
+            # not fully resolved yet; return what we have so far
+            return value
+        return self.processFunction(value)
+        
+    def processFunction(self, value):
+        it = iter(value)
+        function = next(it, None)
+        if function == "join":
+            delimiter = next(it, None)
+            t = next(it, None)
+            return delimiter.join(v for v in t)
+        elif function == "merge":
+            d = {}
+            for v in it:
+                if type(v) is dict:
+                    for key in v:
+                        d[key] = v[key]
+                else:
+                    d[v] = v
+            return d;
+        elif function == "concat":
+            d = []
+            for v in it:
+                if type(v) is list:
+                    for entry in v:
+                        d.append(entry)
+                else:
+                    d.append(v)
+            return d;
+        elif function == "element":
+            lst = next(it, None)
+            index = next(it, None)
+            if '*' in lst:
+                return value
+            return lst[index]
+        else:
+            # coalesce/coalescelist
+            d = {}
+            if value[len(value)-1] == "...":
+                # there is a single list that needs to be processed
+                for v in value[1]:
+                    if v:
+                        if type(v) is tuple:
+                            return self.processFunction(v)
+                        else:
+                            return v
+            else:
+                for v in it:
+                    if v:
+                        if type(v) is tuple:
+                            return self.processFunction(v)
+                        else:
+                            return v
+            # no non-empty entries; undefined what to do so return None
+            return None;
+        
 
     # returns True if given dictionary d contains a key of __isModule__
     def isModule(self, d):
@@ -878,7 +1054,8 @@ class PreProcessor:
         b = t[1]
         e = t[2]
         if var.startswith("["):
-            var = var[1:len(var)-1]            
+            var = var[1:len(var)-1]
+        var = var.strip()
         rv = self.resolveVariable(var, moduleName)
         if b == 0 and (e == len(value) or e == -1):
             # full replacement; don't merge since a string may not have been returned
@@ -935,41 +1112,11 @@ class PreProcessor:
                     self.logMsgAlways("info", "  replacing ${" + var + "} with " + replacementValue)
                     # resolve the variable again since the replacement may also contain variables
                     return (self.resolveVariableLine(replacementValue, moduleName), not insideBrackets)
-        elif type(replacementValue) is int:
-            self.logMsgAlways("info", "  replacing ${" + var + "} with " + str(replacementValue))
-        elif type(replacementValue) is dict:
-            bb = value.find("[")
-            if bb == -1:
-                # assume a dictionary is expected as replacement value
-                if isOldTFvarStyle:
-                    self.logMsgAlways("info", "  replacing ${" + value + "} with " + str(replacementValue))
-                else:
-                    self.logMsgAlways("info", "  replacing " + value + " with " + str(replacementValue))
-                return (replacementValue, not insideBrackets)
-            ee = value.find("]", bb)
-            if ee == -1:
-                self.add_error("Couldn't find ] for dictionary entry in replacement variable: " + value, moduleName, "---", "high")
-                return (foundDelineatorErrRepl + value + "}", not insideBrackets)
-            vn = value[bb+1:ee]
+        else:
             if isOldTFvarStyle:
-                replacementValue = replacementValue.get(vn, foundDelineatorErrRepl + value[len(foundDelineator):])
+                self.logMsgAlways("info", "  replacing " + foundDelineator + var + "} with " + str(replacementValue))
             else:
-                replacementValue = replacementValue.get(vn, foundDelineatorErrRepl + value[len(foundDelineator):])
-            if replacementValue is str and replacementValue.startswith(foundDelineatorErrRepl):
-                self.logMsg("debug", "Couldn't find a replacement (2) for: " + self.getOrigVar(value) + " in " + moduleName)
-            if type(replacementValue) is list:
-                replacementValue = str(replacementValue)
-                if isOldTFvarStyle:
-                    self.logMsgAlways("info", "  replacing " + foundDelineator + value + "}[" + vn + "] with " + replacementValue)
-                else:
-                    self.logMsgAlways("info", "  replacing " + value + " with " + replacementValue)
-
-        if type(replacementValue) is list:
-            replacementValue = str(replacementValue)
-            if isOldTFvarStyle:
-                self.logMsgAlways("info", "  replacing " + foundDelineator + var + "} with " + replacementValue)
-            else:
-                self.logMsgAlways("info", "  replacing " + var + " with " + replacementValue)
+                self.logMsgAlways("info", "  replacing " + var + " with " + str(replacementValue))
 
         return (replacementValue, not insideBrackets)
 
@@ -984,47 +1131,33 @@ class PreProcessor:
             return var
 
     # check if given value contains a variable anywhere
-    def containsVariable(self, value):
-        t = self.containsVariableByType(value)
-        if t[0] != -1:
-            return True
-        return False
-
-    def containsVariableByType(self, value):
+    def containsVariable(self, value, isAnyVar=False):
         if type(value) is str:
-            return self.findVariableDelineatorsForVars(value, False)
+            t = self.findAnyVariableDelineatorsForVars(value, False, isAnyVar)
+            if t[0] == -1:
+                return False
+            return True
         elif type(value) is dict:
-            return self.containsVariableDict(value)
+            return self.containsVariableDict(value, isAnyVar)
         elif type(value) is list:
-            return self.containsVariableList(value)
+            return self.containsVariableList(value, isAnyVar)
         else:
             # not a variable
-            return (-1, 0)
+            return False
 
-    def containsVariableDict(self, value):
-        returnValue = {}
+    def containsVariableDict(self, value, isAnyVar):
         for key in value:
-            returnValue[key] = self.containsVariableByType(value[key])
-        # check all returned values
-        for key in returnValue:
-            if returnValue[key][0] != -1:
-                # variable found
-                return (1, 0)
+            if self.containsVariable(value[key], isAnyVar):
+                return True
         # no variables found
-        return (-1, 0)
+        return False
 
-    def containsVariableList(self, value):
-        index = 0
+    def containsVariableList(self, value, isAnyVar):
         for v in value:
-            value[index] = self.containsVariableByType(v)
-            index += 1
-        # check all returned values
-        for v in value:
-            if v[0] != -1:
-                # variable found
-                return (1, 0)
+            if self.containsVariable(v, isAnyVar):
+                return True
         # no variables found
-        return (-1, 0)
+        return False
 
     # find deepest nested variable in given value
     def findVariable(self, value, isNested, previouslyFoundVar=None):
@@ -1043,7 +1176,7 @@ class PreProcessor:
             else:
                 braceOnly = False
  
-            b, e, foundDelineator, foundDelineatorErrRepl = self.findVariableDelineatorsForVars(val, braceOnly)
+            b, e, foundDelineator, foundDelineatorErrRepl = self.findVariableDelineatorsForVars(val, braceOnly, self.variableFind, self.variableErrorReplacement)
             if b == -1:
                 return None                
             if b > 0:
@@ -1057,22 +1190,23 @@ class PreProcessor:
                         e -= 1
                 
             isVar = True
-            if "{" in foundDelineator:
-                if e == -1:
-                    # problem
-                    self.add_error("Matching close brace not found: " + value, "---", "---", "high")
-                    return None
-                foundVar = (value[b:e], b, e, insideBrackets, foundDelineator, foundDelineatorErrRepl)
-            else:
-                foundVar = (value[b:e], b, e, insideBrackets, foundDelineator, foundDelineatorErrRepl)
+            if "{" in foundDelineator and e == -1:
+                # problem
+                self.add_error("Matching close brace not found: " + value, "---", "---", "high")
+                return None
+            
+            foundVar = (value[b:e], b, e, insideBrackets, foundDelineator, foundDelineatorErrRepl)
             
             newSearchValue = foundVar[0]
+            bOffset = 0
             if isVar:
                 # remove delineator(s)
                 if newSearchValue.endswith("}"):
                     newSearchValue = newSearchValue[2:len(newSearchValue)-1]
+                    bOffset = 2
                 else:
                     newSearchValue = newSearchValue[len(foundDelineator):]
+                    bOffset = len(foundDelineator)
             else:
                 newSearchValue = newSearchValue[1:len(newSearchValue)-1]
                 if not insideBrackets:
@@ -1080,6 +1214,9 @@ class PreProcessor:
                     fv_length = len(previouslyFoundVar[4])
                     b += fv_length
                     e += fv_length
+                    bOffset = 0
+                else:
+                    bOffset = 1
                 foundVar = (newSearchValue, b, e, insideBrackets, foundDelineator, foundDelineatorErrRepl)
             if newSearchValue not in self.terraform_workspaces[0]:
                 # recursively find variable
@@ -1093,19 +1230,30 @@ class PreProcessor:
                 if insideBrackets:
                     # use beginning & ending from previous
                     fv = (fv[0], b, e, fv[3], fv[4], fv[5])
+                else:
+                    fv = (fv[0], fv[1]+b+bOffset, fv[2]+b+bOffset, fv[3], fv[4], fv[5])
                 return fv
             else:
                 return foundVar
         return previouslyFoundVar
 
-    def findVariableDelineatorsForVars(self, value, braceOnly):
+    def findAnyVariableDelineatorsForVars(self, value, braceOnly, isAnyVar):
+        if isAnyVar:
+            for variableFind in self.replaceableVariablePrefixes:
+                t = self.findVariableDelineatorsForVars(value, braceOnly, [variableFind], [variableFind])
+                if t[0] != -1:
+                    return t
+            return -1, 0, None, None
+        return self.findVariableDelineatorsForVars(value, braceOnly, self.variableFind, self.variableErrorReplacement)
+        
+    def findVariableDelineatorsForVars(self, value, braceOnly, variableFind, variableErrorReplacement):
         if braceOnly and value not in self.terraform_workspaces:
-            b, e = self.findVariableDelineators(value, self.variableFind[0], "}", self.variableErrorReplacement[0])
+            b, e = self.findVariableDelineators(value, variableFind[0], "}", variableErrorReplacement[0])
             if b > -1:
-                return b, e, self.variableFind[0], self.variableErrorReplacement[0]
+                return b, e, variableFind[0], variableErrorReplacement[0]
         else:
             prevB = -1
-            for varPrefix, varErrorReplacement in zip(self.variableFind, self.variableErrorReplacement):
+            for varPrefix, varErrorReplacement in zip(variableFind, variableErrorReplacement):
                 if varPrefix[1] == "{":
                     closeVar = "}"
                 else:
@@ -1137,8 +1285,14 @@ class PreProcessor:
             if matchObject != None:
                 return -1, 0
         if closeVar == None:
+            if openVar in self.terraform_workspaces:
+                return b, b + len(openVar)
             # search for default "closeVars"
-            defaultCloseVars = [",", ")", "}"]
+            if value.find("[", b) == -1:
+                defaultCloseVars = [",", "'", ")", "}", "]"]
+            else:
+                # don't include ] if [ is in value
+                defaultCloseVars = [",", "'", ")", "}"]
             prevE = 99999
             for closeVar in defaultCloseVars:
                 e = value.find(closeVar, b)
@@ -1165,7 +1319,7 @@ class PreProcessor:
     # find replacement value for given var in given moduleName
     def getReplacementValue(self, var, moduleName, isOldTFvarStyle, dictToCopyFrom=None, tfDict=None):
         replacementValue = None
-        if var.startswith('"') and var.endswith('"'):
+        if (var.startswith('"') and var.endswith('"')) or (var.startswith("'") and var.endswith("'")):
             return var[1:len(var)-1], moduleName, True
         subscript = None
         b = var.find("[")
@@ -1185,29 +1339,41 @@ class PreProcessor:
         notHandled = ["?", "==", "!=", ">", "<", ">=", "<=", "&&", "||", "!", "+", "-", "*", "/", "%"]
         moduleDict = self.modulesDict[moduleName]
         if isOldTFvarStyle:
-            varIndex = 0
+            varsTuple = self.vars[0]
+            localsTuple = self.locals[0]
+            modulesTuple = self.modules[0]
+            terraform_workspacesTuple = self.terraform_workspaces[0]
         else:
-            varIndex = self.passNumber - 1
-        if var.startswith(self.vars[varIndex]):
+            if self.passNumber == 1:
+                varsTuple = self.vars[0]
+                localsTuple = self.locals[0]
+                modulesTuple = self.modules[0]
+                terraform_workspacesTuple = self.terraform_workspaces[0]
+            else:
+                varsTuple = (self.vars[0], self.vars[1])
+                localsTuple = (self.locals[0], self.locals[1])
+                modulesTuple = (self.modules[0], self.modules[1])
+                terraform_workspacesTuple = (self.terraform_workspaces[0], self.terraform_workspaces[1])
+        if v.startswith(varsTuple):
             # conditional statements, boolean statements, and math are not currently handled
-            if not any(x in var for x in notHandled):
+            if not any(x in v for x in notHandled):
                 isHandledType = True
-            v = v[len(self.vars[varIndex]):]
+            v = v[self.getPrefixLength(v, varsTuple):]
             index = v.find('.')
             if index > -1:
                 subscript = v[index+1:]
                 v = v[:index]
             replacementValue = moduleDict[self.VARIABLE].get(v)
-        elif var.startswith(self.locals[varIndex]):
-            if not any(x in var for x in notHandled):
+        elif v.startswith(localsTuple):
+            if not any(x in v for x in notHandled):
                 isHandledType = True
-            v = v[len(self.locals[varIndex]):]
+            v = v[self.getPrefixLength(v, localsTuple):]
             replacementValue = moduleDict[self.LOCALS].get(v)
-        elif var.startswith(self.modules[varIndex]):
-            if not any(x in var for x in notHandled):
+        elif v.startswith(modulesTuple):
+            if not any(x in v for x in notHandled):
                 isHandledType = True
             # variable is in a different module
-            modulePrefixLength = len(self.modules[varIndex])
+            modulePrefixLength = self.getPrefixLength(v, modulesTuple)
             e = v.find(".", modulePrefixLength)
             if e == -1:
                 self.add_error("Error Resolving module variable: " + var + "  expected ending '.' not found", moduleName, "---", "high")
@@ -1221,26 +1387,30 @@ class PreProcessor:
                     t = self.getNextLevel(remainingVar, ".")
                     moduleOutputDict = moduleOutputDict.get(t[0])
                     if moduleOutputDict is None:
-                        self.logMsg("error", "Error resolving variable: " + v + "  variable not found in module (no module source available?) in " + moduleName)
+                        self.logMsg("error", "Error resolving variable: " + var + "  variable not found in module (no module source available?) in " + moduleName)
                         return var, moduleName, True
                     remainingVar = t[1]
                 if type(moduleOutputDict) is dict:
                     replacementValue = moduleOutputDict.get(self.VALUE, moduleOutputDict)
                 else:
                     replacementValue = moduleOutputDict
-        elif var == self.terraform_workspaces[varIndex]:
+        elif v.startswith(terraform_workspacesTuple):
             isHandledType = True
 
-        if type(replacementValue) is dict:
-            if len(replacementValue) == 0:
-                replacementValue = None
-            elif subscript != None:
-                replacementValue = replacementValue[subscript]
+        if type(replacementValue) is dict and subscript != None:
+            replacementValue = replacementValue.get(subscript, subscript)
 
         if replacementValue is None:
             replacementValue = self.variablesFromCommandLine.get(var, var)
 
         return replacementValue, moduleName, isHandledType
+
+    def getPrefixLength(self, var, varTuple):
+        if type(varTuple) is str:
+            return len(varTuple)
+        for t in varTuple:
+            if var.startswith(t):
+                return len(t)
 
     def getPreviousLevel(self, var, separator):
         b = var.rfind(separator)
@@ -1255,8 +1425,29 @@ class PreProcessor:
         return (var[:b], var[b+1:])
 
     # add given failure in given fileName
-    def add_failure(self, failure, moduleName, fileName, severity):
-        self.jsonOutput["failures"].append( self.getFailureMsg(severity, failure, moduleName, fileName) )
+    def add_failure(self, failure, moduleName, fileName, severity, isRuleOverridden, overrides, resourceName):
+        waived = ""
+        waiver = self.overridden(isRuleOverridden, overrides, resourceName, severity)
+        if waiver is not None:
+            if severity == "high":
+                waived = "**waived by " + waiver + "**"
+            else:
+                waived = "**waived**"
+        self.jsonOutput["failures"].append( self.getFailureMsg(severity, waived, failure, moduleName, fileName) )
+
+    def overridden(self, isRuleOverridden, overrides, resourceName, severity):
+        if isRuleOverridden:
+            for override in overrides:
+                if override[1] == resourceName:
+                    if severity == "high":
+                        if len(override) == 3:
+                            return override[2]
+                        print("***Invalid override: " + ":".join(override))
+                        print("high severity rules must include RR or RAR")
+                        print("Needs to be in the following format:  rule_name:resource_name:RR-xxx or rule_name:resource_name:RAR-xxx where xxx is 1-10 digits")
+                        sys.exit(99)
+                    return ""
+        return None
 
     # add given error in given fileName
     def add_error(self, error, moduleName, fileName, severity):
@@ -1264,26 +1455,27 @@ class PreProcessor:
             self.add_error_force(error, moduleName, fileName, severity)
 
     def add_error_force(self, error, moduleName, fileName, severity):
-        self.jsonOutput["errors"].append( self.getFailureMsg(severity, error, moduleName, fileName) )
+        self.jsonOutput["errors"].append( self.getFailureMsg(severity, "", error, moduleName, fileName) )
 
-    def getFailureMsg(self, severity, msg, moduleName, fileName):
+    def getFailureMsg(self, severity, waived, msg, moduleName, fileName):
         message = {}
         message["severity"] = severity
+        message["waived"] = waived
         message["message"] = msg
         message["moduleName"] = moduleName
         message["fileName"] = fileName
         return message
 
-    def logMsg(self, type, msg):
+    def logMsg(self, typ, msg):
         if self.passNumber == 2:
-            self.logMsgAlways(type, msg)
+            self.logMsgAlways(typ, msg)
 
-    def logMsgAlways(self, type, msg):
-        if type == "error":
+    def logMsgAlways(self, typ, msg):
+        if typ == "error":
             logging.error(msg)
-        elif type == "warning":
+        elif typ == "warning":
             logging.warning(msg)
-        elif type == "info":
+        elif typ == "info":
             logging.info(msg)
-        elif type == "debug":
+        elif typ == "debug":
             logging.debug(msg)

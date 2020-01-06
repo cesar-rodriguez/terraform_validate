@@ -27,9 +27,11 @@ class TestValidatorFunctional(unittest.TestCase):
         preprocessor.process(os.path.join(self.path, path))
         validator = t.Validator()
         validator.preprocessor = preprocessor
+        validator.isRuleOverridden = False
+        validator.overrides = []
         if errorIfPropertyMissing:
             validator.error_if_property_missing()
-        return validator.get_terraform_files()
+        return validator.get_terraform_files(False)
 
     def error_list_format(self, error_list):
         if type(error_list) is not list:
@@ -316,8 +318,8 @@ class TestValidatorFunctional(unittest.TestCase):
 
     def test_variable_default_value_equals(self):
         for validator in self.getValidatorGenerator("fixtures/default_variable"):
-            fooValue = validator.preprocessor.modulesDict["default_variable"]["variable"].get("foo")
-            barValue = validator.preprocessor.modulesDict["default_variable"]["variable"].get("bar")
+            fooValue = validator.preprocessor.modulesDict["fixtures/default_variable"]["variable"].get("foo")
+            barValue = validator.preprocessor.modulesDict["fixtures/default_variable"]["variable"].get("bar")
         self.assertEqual("1", fooValue)
         self.assertIsNone(barValue)
         self.assertEqual(0, len(self.jsonOutput["failures"]))
